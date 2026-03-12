@@ -166,14 +166,23 @@ func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
 		var doNow, waiting, review, done []cache.CachedPR
 		seenPRs := make(map[string]bool)
 
+		// Re-verify username if it's the default fallback
+		if username == "" || username == "user" {
+			if u, err := gh.CheckAuth(); err == nil && u != "user" {
+				username = u
+			}
+		}
+
 		// Step 1: Search for my authored PRs (fast, cross-repo)
 		myPRs, _ := gh.SearchMyPRs()
 
-		// Build set of repos from: search results + config
+		// Build set of repos + my PR numbers from search results
 		repoSet := make(map[string]bool)
+		myPRKeys := make(map[string]bool) // "repo#number" keys for PRs I authored
 		for _, pr := range myPRs {
 			if pr.Repository.NameWithOwner != "" {
 				repoSet[pr.Repository.NameWithOwner] = true
+				myPRKeys[fmt.Sprintf("%s#%d", pr.Repository.NameWithOwner, pr.Number)] = true
 			}
 		}
 		for _, repo := range cfg.Repos {
@@ -194,8 +203,8 @@ func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
 				}
 				seenPRs[key] = true
 
-				// Only show PRs authored by current user in Do Now / Waiting
-				isMyPR := strings.EqualFold(pr.Author.Login, username)
+				// Check if this is my PR: either from search results or by username match
+				isMyPR := myPRKeys[key] || strings.EqualFold(pr.Author.Login, username)
 
 				cached := cache.CachedPR{
 					PR:   *pr,
@@ -777,30 +786,32 @@ func (m *dashModel) checkoutPRCmd() tea.Cmd {
 	branch := pr.HeadRefName
 	number := pr.Number
 
-	// First, try to find the repo locally in workspace
+	// Capture workspace scan dirs for use inside the closure
 	localPath := m.findLocalRepo(repo)
+	reposDir := m.cfg.Settings.ReposDir
 
-	if localPath != "" {
-		// Found locally — checkout the branch
-		m.statusMsg = fmt.Sprintf("Checking out %s in %s...", branch, localPath)
-		return func() tea.Msg {
-			// Fetch first to get latest branches
+	m.statusMsg = fmt.Sprintf("Checking out PR #%d...", number)
+	return func() tea.Msg {
+		// If branch name is unknown (search results), fetch it first
+		if branch == "" {
+			detail, err := gh.GetPRDetail(repo, number)
+			if err != nil || detail.HeadRefName == "" {
+				return checkoutDoneMsg{repo: repo, branch: "unknown", err: fmt.Errorf("can't determine branch for PR #%d", number)}
+			}
+			branch = detail.HeadRefName
+		}
+
+		// If repo exists locally, checkout there
+		if localPath != "" {
 			gitCmd(localPath, "fetch", "--all")
-			// Try checking out the branch
 			_, err := gitCmd(localPath, "checkout", branch)
 			if err != nil {
-				// Branch might not exist locally, try creating from remote
 				_, err = gitCmd(localPath, "checkout", "-b", branch, "origin/"+branch)
 			}
 			return checkoutDoneMsg{repo: repo, branch: branch, err: err}
 		}
-	}
 
-	// Not found locally — use gh pr checkout (clones if needed)
-	m.statusMsg = fmt.Sprintf("Checking out PR #%d from %s...", number, repo)
-	reposDir := m.cfg.Settings.ReposDir
-	return func() tea.Msg {
-		// Clone to reposDir first, then checkout
+		// Not found locally — clone first, then checkout
 		dest := reposDir + "/" + repo
 		if !isGitRepo(dest) {
 			err := gh.CloneRepo(repo, dest)
@@ -808,7 +819,6 @@ func (m *dashModel) checkoutPRCmd() tea.Cmd {
 				return checkoutDoneMsg{repo: repo, branch: branch, err: fmt.Errorf("clone failed: %w", err)}
 			}
 		}
-		// Now checkout the branch
 		gitCmd(dest, "fetch", "--all")
 		_, err := gitCmd(dest, "checkout", branch)
 		if err != nil {
@@ -867,33 +877,23 @@ func (m *dashModel) cloneRepoCmd(repo string) tea.Cmd {
 
 // findLocalRepo searches workspace scan dirs for a repo matching the given name
 func (m *dashModel) findLocalRepo(repo string) string {
-	// Check explicit workspace repos mapping first
-	if path, ok := m.cfg.Workspace.Repos[repo]; ok {
-		if isGitRepo(path) {
-			return path
-		}
-	}
-
-	// Extract just the repo name for matching
 	parts := strings.Split(repo, "/")
 	repoName := repo
 	if len(parts) == 2 {
 		repoName = parts[1]
 	}
 
-	// Search scan dirs
-	for _, dir := range m.cfg.Workspace.ScanDirs {
-		// Check direct: dir/repo-name
-		path := dir + "/" + repoName
+	// Fast path: check already-scanned workspace results first (no subprocess)
+	for _, ws := range m.workspace {
+		if ws.Name == repo || ws.Name == repoName {
+			return ws.Path
+		}
+	}
+
+	// Check explicit workspace repos mapping
+	if path, ok := m.cfg.Workspace.Repos[repo]; ok {
 		if isGitRepo(path) {
 			return path
-		}
-		// Check org/repo structure: dir/org/repo
-		if len(parts) == 2 {
-			path = dir + "/" + parts[0] + "/" + parts[1]
-			if isGitRepo(path) {
-				return path
-			}
 		}
 	}
 
@@ -910,10 +910,17 @@ func (m *dashModel) findLocalRepo(repo string) string {
 		}
 	}
 
-	// Also check workspace scan results
-	for _, ws := range m.workspace {
-		if ws.Name == repo || ws.Name == repoName {
-			return ws.Path
+	// Slow path: scan dirs (subprocess per check)
+	for _, dir := range m.cfg.Workspace.ScanDirs {
+		path := dir + "/" + repoName
+		if isGitRepo(path) {
+			return path
+		}
+		if len(parts) == 2 {
+			path = dir + "/" + parts[0] + "/" + parts[1]
+			if isGitRepo(path) {
+				return path
+			}
 		}
 	}
 
@@ -1122,13 +1129,19 @@ func (m dashModel) renderPRCards(prs []cache.CachedPR, width int) string {
 		maxShow = 15
 	}
 
-	for i, pr := range prs {
-		if i >= maxShow {
+	// Scroll window: keep cursor visible
+	start := 0
+	if m.cursor >= maxShow {
+		start = m.cursor - maxShow + 1
+	}
+
+	for i := start; i < len(prs); i++ {
+		if i-start >= maxShow {
 			s.WriteString(fmt.Sprintf("\n  %s\n",
-				repoStyle.Render(fmt.Sprintf("+ %d more...", len(prs)-maxShow))))
+				repoStyle.Render(fmt.Sprintf("+ %d more...", len(prs)-i))))
 			break
 		}
-		s.WriteString(m.renderPRCard(pr, i == m.cursor, width-6))
+		s.WriteString(m.renderPRCard(prs[i], i == m.cursor, width-6))
 	}
 	return s.String()
 }
@@ -1145,14 +1158,11 @@ func (m dashModel) renderPRCard(pr cache.CachedPR, selected bool, width int) str
 	numStr := prNumberStyle.Render(fmt.Sprintf("#%d", pr.Number))
 	repoStr := prRepoStyle.Render(repoShort)
 
-	title := pr.Title
 	maxTitle := width - len(repoShort) - 10
 	if maxTitle < 20 {
 		maxTitle = 30
 	}
-	if len(title) > maxTitle {
-		title = title[:maxTitle-3] + "..."
-	}
+	title := truncate(pr.Title, maxTitle)
 
 	titleStr := prTitleStyle.Render(title)
 	if selected {
@@ -1202,7 +1212,24 @@ func (m dashModel) renderWorkspaceCards(width int) string {
 	}
 
 	var s strings.Builder
-	for i, ws := range m.workspace {
+	maxShow := m.height - 10
+	if maxShow < 5 {
+		maxShow = 15
+	}
+
+	// Scroll window: keep cursor visible
+	start := 0
+	if m.cursor >= maxShow {
+		start = m.cursor - maxShow + 1
+	}
+
+	for i := start; i < len(m.workspace); i++ {
+		if i-start >= maxShow {
+			s.WriteString(fmt.Sprintf("\n  %s\n",
+				repoStyle.Render(fmt.Sprintf("+ %d more...", len(m.workspace)-i))))
+			break
+		}
+		ws := m.workspace[i]
 		s.WriteString(m.renderWorkspaceCard(&ws, i == m.cursor, width-6))
 	}
 	return s.String()
@@ -1501,8 +1528,8 @@ func formatTimeAgo(isoTime string) string {
 		"2006-01-02 15:04:05 -0700 MST",
 		time.RFC3339Nano,
 	}
-	for _, fmt := range formats {
-		t, err := time.Parse(fmt, isoTime)
+	for _, layout := range formats {
+		t, err := time.Parse(layout, isoTime)
 		if err == nil {
 			return timeSince(t)
 		}
