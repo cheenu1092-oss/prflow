@@ -576,134 +576,140 @@ func (m dashModel) View() string {
 }
 
 func (m dashModel) viewDashboard() string {
-	// Header
+	// ─── Header Bar ─────────────────────────────────────────
 	syncAgo := ""
 	if !m.lastSync.IsZero() {
-		syncAgo = fmt.Sprintf("⟳ %s", timeSince(m.lastSync))
+		syncAgo = fmt.Sprintf("  ⟳ %s", timeSince(m.lastSync))
 	}
-
 	totalPRs := len(m.doNow) + len(m.waiting) + len(m.review)
-	header := headerStyle.Render(fmt.Sprintf("  PRFlow  @%s · %d active PRs  %s", m.username, totalPRs, syncAgo))
 
-	// Sidebar
+	headerWidth := m.width
+	if headerWidth < 60 {
+		headerWidth = 80
+	}
+	header := headerStyle.Width(headerWidth).Render(
+		fmt.Sprintf(" ⚡ PRFlow    @%s  ·  %d active PRs%s", m.username, totalPRs, syncAgo))
+
+	// ─── Sidebar ────────────────────────────────────────────
 	sidebar := m.renderSidebar()
 
-	// Main content
-	main := m.renderMainPanel()
+	// ─── Main Panel ─────────────────────────────────────────
+	mainWidth := m.width - 28
+	if mainWidth < 40 {
+		mainWidth = 60
+	}
+	main := m.renderMainPanel(mainWidth)
 
-	// Help bar
+	// ─── Status Bar ─────────────────────────────────────────
+	statusBar := m.renderStatusBar()
+
+	// ─── Help Bar ───────────────────────────────────────────
 	help := m.renderHelp()
 
-	// Status / Error
-	errLine := ""
-	if m.statusMsg != "" {
-		errLine = "\n" + lipgloss.NewStyle().Foreground(colorCyan).Render("  "+m.statusMsg)
-	}
-	if m.err != "" {
-		errLine += "\n" + lipgloss.NewStyle().Foreground(colorDanger).Render("  Error: "+m.err)
-	}
-
-	// Layout: sidebar | main
+	// ─── Compose Layout ─────────────────────────────────────
 	content := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
 
-	return header + "\n" + content + errLine + "\n" + help
+	return header + "\n" + content + "\n" + statusBar + help
 }
 
 func (m dashModel) renderSidebar() string {
 	var s strings.Builder
 
-	sections := []section{sectionDoNow, sectionWaiting, sectionReview, sectionWorkspace, sectionDone}
-	counts := []int{len(m.doNow), len(m.waiting), len(m.review), len(m.workspace), len(m.done)}
+	type sidebarEntry struct {
+		icon  string
+		label string
+		count int
+		sec   section
+	}
 
-	s.WriteString("\n")
-	for i, sec := range sections {
-		label := fmt.Sprintf("%s (%d)", sec, counts[i])
-		if sec == m.section {
-			s.WriteString(sidebarItemSelectedStyle.Render("▸ "+label) + "\n")
+	entries := []sidebarEntry{
+		{"⚡", "Do Now", len(m.doNow), sectionDoNow},
+		{"⏳", "Waiting", len(m.waiting), sectionWaiting},
+		{"👀", "Review", len(m.review), sectionReview},
+		{"📂", "Workspace", len(m.workspace), sectionWorkspace},
+		{"✅", "Done", len(m.done), sectionDone},
+	}
+
+	for _, e := range entries {
+		countStr := sidebarCountStyle.Render(fmt.Sprintf(" %d", e.count))
+		if e.sec == m.section {
+			s.WriteString(sidebarActiveStyle.Render(
+				fmt.Sprintf("▸ %s %s", e.icon, e.label)) + countStr + "\n")
 		} else {
-			s.WriteString(sidebarItemStyle.Render("  "+label) + "\n")
+			s.WriteString(sidebarSectionStyle.Render(
+				fmt.Sprintf("  %s %s", e.icon, e.label)) + countStr + "\n")
 		}
 	}
 
 	// Favorites
 	if len(m.cfg.Favorites) > 0 {
 		s.WriteString("\n")
-		s.WriteString(favStarStyle.Render("  ★ Favorites") + "\n")
+		s.WriteString(favHeaderStyle.Render("★ Favorites") + "\n")
 		for _, fav := range m.cfg.Favorites {
 			parts := strings.Split(fav, "/")
 			name := fav
 			if len(parts) == 2 {
 				name = parts[1]
 			}
-			s.WriteString(sidebarItemStyle.Render("    "+name) + "\n")
+			s.WriteString(favItemStyle.Render(name) + "\n")
 		}
 	}
 
 	return sidebarStyle.Render(s.String())
 }
 
-func (m dashModel) renderMainPanel() string {
+func (m dashModel) renderMainPanel(width int) string {
 	var s strings.Builder
 
+	// Section header with rule
+	s.WriteString(sectionHeader.Width(width - 4).Render(m.section.String()))
 	s.WriteString("\n")
-	s.WriteString(sectionHeader.Render(m.section.String()) + "\n")
 
 	if m.loading {
 		spin := m.spinFrames[m.spinner%len(m.spinFrames)]
-		s.WriteString(fmt.Sprintf("  %s Loading PRs...\n", spin))
-		return mainPanelStyle.Render(s.String())
+		s.WriteString(fmt.Sprintf("\n %s Syncing with GitHub...\n", spin))
+		return mainPanelStyle.Width(width).Render(s.String())
 	}
 
 	switch m.section {
 	case sectionDoNow:
-		s.WriteString(m.renderPRList(m.doNow))
+		s.WriteString(m.renderPRCards(m.doNow, width))
 	case sectionWaiting:
-		s.WriteString(m.renderPRList(m.waiting))
+		s.WriteString(m.renderPRCards(m.waiting, width))
 	case sectionReview:
-		s.WriteString(m.renderPRList(m.review))
+		s.WriteString(m.renderPRCards(m.review, width))
 	case sectionWorkspace:
-		s.WriteString(m.renderWorkspace())
+		s.WriteString(m.renderWorkspaceCards(width))
 	case sectionDone:
-		if len(m.done) == 0 {
-			s.WriteString("  No recently merged PRs\n")
-		} else {
-			s.WriteString(m.renderPRList(m.done))
-		}
+		s.WriteString(m.renderPRCards(m.done, width))
 	}
 
-	return mainPanelStyle.Render(s.String())
+	return mainPanelStyle.Width(width).Render(s.String())
 }
 
-func (m dashModel) renderPRList(prs []cache.CachedPR) string {
+func (m dashModel) renderPRCards(prs []cache.CachedPR, width int) string {
 	if len(prs) == 0 {
-		return "  Nothing here! 🎉\n"
+		return emptyStyle.Render("Nothing here — you're all caught up! 🎉")
 	}
 
 	var s strings.Builder
-	maxShow := m.height - 8
+	maxShow := m.height - 10
 	if maxShow < 5 {
-		maxShow = 20
+		maxShow = 15
 	}
 
 	for i, pr := range prs {
 		if i >= maxShow {
-			s.WriteString(fmt.Sprintf("  ... and %d more\n", len(prs)-maxShow))
+			s.WriteString(fmt.Sprintf("\n  %s\n",
+				repoStyle.Render(fmt.Sprintf("+ %d more...", len(prs)-maxShow))))
 			break
 		}
-
-		selected := i == m.cursor
-		s.WriteString(m.renderPRItem(pr, selected))
-		s.WriteString("\n")
+		s.WriteString(m.renderPRCard(pr, i == m.cursor, width-6))
 	}
 	return s.String()
 }
 
-func (m dashModel) renderPRItem(pr cache.CachedPR, selected bool) string {
-	cursor := "  "
-	if selected {
-		cursor = "▸ "
-	}
-
+func (m dashModel) renderPRCard(pr cache.CachedPR, selected bool, width int) string {
 	// Repo short name
 	parts := strings.Split(pr.Repo, "/")
 	repoShort := pr.Repo
@@ -711,130 +717,209 @@ func (m dashModel) renderPRItem(pr cache.CachedPR, selected bool) string {
 		repoShort = parts[1]
 	}
 
+	// Line 1: repo  #number  title
 	numStr := prNumberStyle.Render(fmt.Sprintf("#%d", pr.Number))
-	repoStr := repoStyle.Render(repoShort)
+	repoStr := prRepoStyle.Render(repoShort)
 
-	// Status indicator
-	status := m.prStatusStr(pr)
-
-	// Title (truncated)
 	title := pr.Title
-	maxTitle := 50
+	maxTitle := width - len(repoShort) - 10
+	if maxTitle < 20 {
+		maxTitle = 30
+	}
 	if len(title) > maxTitle {
 		title = title[:maxTitle-3] + "..."
 	}
 
+	titleStr := prTitleStyle.Render(title)
 	if selected {
-		return prItemSelectedStyle.Render(fmt.Sprintf("%s%s %s  %s\n    %s",
-			cursor, repoStr, numStr, title, status))
+		titleStr = prTitleSelectedStyle.Render(title)
 	}
-	return prItemStyle.Render(fmt.Sprintf("%s%s %s  %s\n    %s",
-		cursor, repoStr, numStr, title, status))
+
+	line1 := fmt.Sprintf("%s  %s  %s", repoStr, numStr, titleStr)
+
+	// Line 2: status badge + time
+	badge := m.prBadge(pr)
+	timeAgo := ""
+	if pr.UpdatedAt != "" {
+		timeAgo = wsMetaStyle.Render(fmt.Sprintf("  updated %s", formatTimeAgo(pr.UpdatedAt)))
+	}
+	line2 := badge + timeAgo
+
+	content := line1 + "\n" + line2
+
+	if selected {
+		return prCardSelectedStyle.Width(width).Render(content)
+	}
+	return prCardStyle.Width(width).Render(content)
 }
 
-func (m dashModel) prStatusStr(pr cache.CachedPR) string {
+func (m dashModel) prBadge(pr cache.CachedPR) string {
 	switch {
 	case pr.ReviewDecision == "APPROVED" && pr.Mergeable != "CONFLICTING":
-		return statusApproved.Render("✓ approved — ready to merge")
+		return badgeMerge.Render("READY TO MERGE")
+	case pr.ReviewDecision == "APPROVED" && pr.Mergeable == "CONFLICTING":
+		return badgeConflict.Render("CONFLICT")
 	case pr.ReviewDecision == "CHANGES_REQUESTED":
-		return statusChanges.Render("changes requested")
+		return badgeChanges.Render("CHANGES REQUESTED")
 	case pr.Mergeable == "CONFLICTING":
-		return statusChanges.Render("⚠️ merge conflict")
-	case pr.ReviewDecision == "REVIEW_REQUIRED":
-		return statusPending.Render("waiting for review")
+		return badgeConflict.Render("CONFLICT")
 	case pr.IsDraft:
-		return repoStyle.Render("draft")
+		return badgeDraft.Render("DRAFT")
+	case pr.ReviewDecision == "REVIEW_REQUIRED":
+		return badgeWaiting.Render("AWAITING REVIEW")
 	default:
-		return statusPending.Render("in review")
+		return badgeWaiting.Render("IN REVIEW")
 	}
 }
 
-func (m dashModel) renderWorkspace() string {
+func (m dashModel) renderWorkspaceCards(width int) string {
 	if len(m.workspace) == 0 {
-		return "  No repos found. Configure workspace.scan_dirs in config.\n"
+		return emptyStyle.Render("No repos found.\nConfigure workspace.scan_dirs in ~/.config/prflow/config.yaml")
 	}
 
 	var s strings.Builder
 	for i, ws := range m.workspace {
-		selected := i == m.cursor
-		s.WriteString(RenderRepoStatus(&ws, selected))
-		s.WriteString("\n")
+		s.WriteString(m.renderWorkspaceCard(&ws, i == m.cursor, width-6))
 	}
 	return s.String()
+}
+
+func (m dashModel) renderWorkspaceCard(ws *RepoStatus, selected bool, width int) string {
+	nameStr := prNumberStyle.Render(ws.Name)
+
+	// Branch
+	branchStr := wsMetaStyle.Render("on ") + detailValueStyle.Render(ws.Branch)
+
+	// Behind/ahead
+	var baStr string
+	if ws.Behind > 0 && ws.Behind > 20 {
+		baStr = wsBehindStyle.Render(fmt.Sprintf("↓%d behind", ws.Behind)) + "  "
+	} else if ws.Behind > 0 {
+		baStr = wsDirtyStyle.Render(fmt.Sprintf("↓%d behind", ws.Behind)) + "  "
+	}
+	if ws.Ahead > 0 {
+		baStr += wsCleanStyle.Render(fmt.Sprintf("↑%d ahead", ws.Ahead))
+	}
+	if ws.Behind == 0 && ws.Ahead == 0 {
+		baStr = wsCleanStyle.Render("up to date")
+	}
+
+	// Working tree
+	var treeStr string
+	if ws.Clean {
+		treeStr = wsCleanStyle.Render("✓ clean")
+	} else {
+		var parts []string
+		if ws.Modified > 0 {
+			parts = append(parts, fmt.Sprintf("%d modified", ws.Modified))
+		}
+		if ws.Staged > 0 {
+			parts = append(parts, fmt.Sprintf("%d staged", ws.Staged))
+		}
+		if ws.Untracked > 0 {
+			parts = append(parts, fmt.Sprintf("%d untracked", ws.Untracked))
+		}
+		treeStr = wsDirtyStyle.Render(strings.Join(parts, " · "))
+	}
+
+	// Unpushed
+	unpushedStr := ""
+	if ws.Unpushed > 0 {
+		unpushedStr = "\n" + wsDirtyStyle.Render(fmt.Sprintf("⬆ %d unpushed", ws.Unpushed))
+	}
+
+	// Last commit
+	commitStr := ""
+	if ws.LastCommit != "" {
+		commitStr = "\n" + wsMetaStyle.Render(ws.LastCommit)
+	}
+
+	content := nameStr + "  " + branchStr + "\n" + baStr + "  " + treeStr + unpushedStr + commitStr
+
+	if selected {
+		return wsCardSelectedStyle.Width(width).Render(content)
+	}
+	return wsCardStyle.Width(width).Render(content)
 }
 
 func (m dashModel) viewDetail() string {
 	pr := m.detailPR
 	var s strings.Builder
 
+	width := m.width
+	if width < 60 {
+		width = 80
+	}
+
 	// Header
-	header := headerStyle.Render(fmt.Sprintf("  %s #%d", pr.Repo, pr.Number))
+	header := headerStyle.Width(width).Render(
+		fmt.Sprintf(" %s  #%d", pr.Repo, pr.Number))
 	s.WriteString(header + "\n\n")
 
 	// Title
-	s.WriteString(fmt.Sprintf("  %s\n\n", lipgloss.NewStyle().Bold(true).Render(pr.Title)))
+	s.WriteString("  " + lipgloss.NewStyle().Bold(true).Foreground(colorWhite).Render(pr.Title) + "\n\n")
 
-	// Branch
+	// Info grid
 	s.WriteString(fmt.Sprintf("  %s %s → %s\n",
-		detailLabelStyle.Render("Branch:"),
+		detailLabelStyle.Render("Branch"),
 		detailValueStyle.Render(pr.HeadRefName),
-		detailValueStyle.Render(pr.BaseRefName)))
+		wsMetaStyle.Render(pr.BaseRefName)))
 
-	// Status
-	statusStr := ""
-	if pr.IsDraft {
-		statusStr = "Draft"
-	} else if pr.ReviewDecision == "APPROVED" {
-		statusStr = statusApproved.Render("Approved ✓")
-	} else if pr.ReviewDecision == "CHANGES_REQUESTED" {
-		statusStr = statusChanges.Render("Changes Requested")
-	} else {
-		statusStr = statusPending.Render("In Review")
-	}
-	s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Status:"), statusStr))
+	// Status badge
+	s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Status"), m.prBadge(cache.CachedPR{PR: pr.PR})))
 
 	// Mergeable
-	mergeStr := pr.Mergeable
-	if pr.Mergeable == "CONFLICTING" {
-		mergeStr = statusChanges.Render("CONFLICTING ⚠️")
-	} else if pr.Mergeable == "MERGEABLE" {
-		mergeStr = statusApproved.Render("MERGEABLE ✓")
+	if pr.Mergeable != "" {
+		mergeIcon := "  "
+		if pr.Mergeable == "MERGEABLE" {
+			mergeIcon = wsCleanStyle.Render("✓ MERGEABLE")
+		} else if pr.Mergeable == "CONFLICTING" {
+			mergeIcon = wsBehindStyle.Render("✗ CONFLICTING")
+		} else {
+			mergeIcon = wsMetaStyle.Render(pr.Mergeable)
+		}
+		s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Merge"), mergeIcon))
 	}
-	s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Mergeable:"), mergeStr))
 
-	// CI Status
+	// CI Checks
 	if len(pr.StatusCheckRollup) > 0 {
-		s.WriteString(fmt.Sprintf("  %s\n", detailLabelStyle.Render("CI Checks:")))
+		s.WriteString(fmt.Sprintf("\n  %s\n", detailLabelStyle.Render("CI Checks")))
 		for _, check := range pr.StatusCheckRollup {
-			icon := "⏳"
-			if check.Conclusion == "SUCCESS" {
-				icon = "✓"
-			} else if check.Conclusion == "FAILURE" {
-				icon = "✗"
+			var icon string
+			switch check.Conclusion {
+			case "SUCCESS":
+				icon = wsCleanStyle.Render("✓")
+			case "FAILURE":
+				icon = wsBehindStyle.Render("✗")
+			default:
+				icon = wsDirtyStyle.Render("⏳")
 			}
 			s.WriteString(fmt.Sprintf("    %s %s\n", icon, check.Name))
 		}
 	}
 
-	// Reviews
+	// Reviewers
 	if len(pr.Reviews.Nodes) > 0 {
-		s.WriteString(fmt.Sprintf("\n  %s\n", detailLabelStyle.Render("Reviewers:")))
+		s.WriteString(fmt.Sprintf("\n  %s\n", detailLabelStyle.Render("Reviewers")))
 		seen := make(map[string]bool)
 		for _, rev := range pr.Reviews.Nodes {
 			if seen[rev.Author.Login] {
 				continue
 			}
 			seen[rev.Author.Login] = true
-			icon := "⏳"
+			var icon string
 			switch rev.State {
 			case "APPROVED":
-				icon = "✓"
+				icon = wsCleanStyle.Render("✓")
 			case "CHANGES_REQUESTED":
-				icon = "✗"
-			case "COMMENTED":
-				icon = "💬"
+				icon = wsBehindStyle.Render("✗")
+			default:
+				icon = wsDirtyStyle.Render("💬")
 			}
-			s.WriteString(fmt.Sprintf("    %s @%s (%s)\n", icon, rev.Author.Login, rev.State))
+			s.WriteString(fmt.Sprintf("    %s %s  %s\n",
+				icon,
+				threadAuthorStyle.Render("@"+rev.Author.Login),
+				wsMetaStyle.Render(rev.State)))
 		}
 	}
 
@@ -850,53 +935,94 @@ func (m dashModel) viewDetail() string {
 			}
 		}
 
-		s.WriteString(fmt.Sprintf("\n  %s\n",
-			threadHeaderStyle.Render(fmt.Sprintf("📝 Unresolved Threads (%d)", unresolved))))
+		s.WriteString("\n" + threadHeaderStyle.Render(
+			fmt.Sprintf("  📝 Unresolved Threads (%d)", unresolved)) + "\n\n")
 
+		threadIdx := 0
 		for i, t := range m.detailThreads {
 			if t.IsResolved {
 				continue
 			}
 			selected := i == m.threadCursor
-			prefix := "  "
-			if selected {
-				prefix = "▸ "
-			}
-			s.WriteString(fmt.Sprintf("  %s%s:%d\n", prefix, t.Path, t.Line))
+
+			fileStr := threadFileStyle.Render(fmt.Sprintf("%s:%d", t.Path, t.Line))
+			var body string
 			if len(t.Comments) > 0 {
 				last := t.Comments[len(t.Comments)-1]
-				s.WriteString(fmt.Sprintf("    %s: %s\n",
-					threadAuthorStyle.Render("@"+last.Author),
-					truncate(last.Body, 80)))
+				body = threadAuthorStyle.Render("@"+last.Author) + "  " +
+					threadBodyStyle.Render(truncate(last.Body, 70))
 			}
-			s.WriteString("\n")
+
+			content := fileStr + "\n" + body
+			cardWidth := width - 8
+			if cardWidth < 40 {
+				cardWidth = 60
+			}
+
+			if selected {
+				s.WriteString("  " + threadCardSelectedStyle.Width(cardWidth).Render(content) + "\n")
+			} else {
+				s.WriteString("  " + threadCardStyle.Width(cardWidth).Render(content) + "\n")
+			}
+			threadIdx++
 		}
 
 		if resolved > 0 {
 			s.WriteString(fmt.Sprintf("  %s\n",
-				repoStyle.Render(fmt.Sprintf("✅ Resolved Threads (%d) — collapsed", resolved))))
+				wsMetaStyle.Render(fmt.Sprintf("  ✅ %d resolved threads (collapsed)", resolved))))
 		}
 	}
 
 	// URL
-	s.WriteString(fmt.Sprintf("\n  %s %s\n",
-		detailLabelStyle.Render("URL:"),
-		urlStyle.Render(pr.URL)))
+	s.WriteString(fmt.Sprintf("\n  %s %s\n", detailLabelStyle.Render("URL"), urlStyle.Render(pr.URL)))
 
 	// Help
-	s.WriteString(fmt.Sprintf("\n  %s\n",
-		helpStyle.Render("[o] open in browser · [esc] back · [q] quit")))
+	s.WriteString("\n" + m.renderDetailHelp())
 
 	return s.String()
 }
 
-func (m dashModel) renderHelp() string {
-	switch m.section {
-	case sectionWorkspace:
-		return helpStyle.Render("  [↑↓] navigate · [tab] sections · [enter] open · [o] github.com · [p] pull · [P] push · [f] fetch all · [R] refresh · [q] quit")
-	default:
-		return helpStyle.Render("  [↑↓] navigate · [tab] sections · [enter] expand · [o] github.com · [R] refresh · [q] quit")
+func (m dashModel) renderStatusBar() string {
+	var parts []string
+	if m.statusMsg != "" {
+		parts = append(parts, statusBarStyle.Render("  "+m.statusMsg))
 	}
+	if m.err != "" {
+		parts = append(parts, statusErrorStyle.Render("  ⚠ "+m.err))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "  ") + "\n"
+}
+
+func (m dashModel) renderHelp() string {
+	var pairs []string
+
+	pairs = append(pairs, helpPair("↑↓", "nav"))
+	pairs = append(pairs, helpPair("tab", "section"))
+	pairs = append(pairs, helpPair("enter", "expand"))
+	pairs = append(pairs, helpPair("o", "open"))
+
+	if m.section == sectionWorkspace {
+		pairs = append(pairs, helpPair("p", "pull"))
+		pairs = append(pairs, helpPair("P", "push"))
+		pairs = append(pairs, helpPair("f", "fetch"))
+	}
+
+	pairs = append(pairs, helpPair("R", "refresh"))
+	pairs = append(pairs, helpPair("q", "quit"))
+
+	return helpStyle.Render("  " + strings.Join(pairs, "  "))
+}
+
+func (m dashModel) renderDetailHelp() string {
+	pairs := []string{
+		helpPair("o", "open in browser"),
+		helpPair("esc", "back"),
+		helpPair("q", "quit"),
+	}
+	return helpStyle.Render("  " + strings.Join(pairs, "  "))
 }
 
 func timeSince(t time.Time) string {
@@ -908,6 +1034,18 @@ func timeSince(t time.Time) string {
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh ago", int(d.Hours()))
+}
+
+func formatTimeAgo(isoTime string) string {
+	t, err := time.Parse(time.RFC3339, isoTime)
+	if err != nil {
+		// Try other formats
+		t, err = time.Parse("2006-01-02T15:04:05Z", isoTime)
+		if err != nil {
+			return ""
+		}
+	}
+	return timeSince(t)
 }
 
 func truncate(s string, max int) string {

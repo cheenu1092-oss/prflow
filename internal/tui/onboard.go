@@ -623,7 +623,7 @@ func (m onboardModel) viewSelectFavorites() string {
 		star := "  "
 		for _, r := range m.allRepos {
 			if r.name == name && r.starred {
-				star = favStarStyle.Render("★ ")
+				star = favHeaderStyle.Render("★ ")
 				break
 			}
 		}
