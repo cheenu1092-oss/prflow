@@ -468,6 +468,15 @@ func ListUserRepos() ([]string, error) {
 	return result, nil
 }
 
+// GetPRDiff returns the diff for a PR
+func GetPRDiff(repo string, number int) (string, error) {
+	out, err := run("pr", "diff", fmt.Sprintf("%d", number), "-R", repo)
+	if err != nil {
+		return "", fmt.Errorf("get diff failed: %w", err)
+	}
+	return out, nil
+}
+
 // SearchOrgRepos searches repos in an org matching a query
 func SearchOrgRepos(query string) ([]string, error) {
 	// Search across all repos the user has access to

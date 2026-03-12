@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/cheenu1092-oss/prflow/internal/ai"
 	"github.com/cheenu1092-oss/prflow/internal/cache"
 	"github.com/cheenu1092-oss/prflow/internal/config"
 	"github.com/cheenu1092-oss/prflow/internal/gh"
@@ -76,6 +77,12 @@ type dashModel struct {
 	searchCursor  int
 	searching     bool
 
+	// AI analysis
+	aiAnalysis    *ai.PRAnalysis
+	aiThread      *ai.ThreadAnalysis
+	aiLoading     bool
+	aiAvailable   bool
+
 	// State
 	loading    bool
 	lastSync   time.Time
@@ -127,6 +134,16 @@ type checkoutDoneMsg struct {
 	err    error
 }
 
+type aiAnalysisDoneMsg struct {
+	analysis *ai.PRAnalysis
+	err      error
+}
+
+type aiThreadDoneMsg struct {
+	analysis *ai.ThreadAnalysis
+	err      error
+}
+
 type dashTickMsg time.Time
 
 func RunDashboard(cfg *config.Config) error {
@@ -139,11 +156,12 @@ func RunDashboard(cfg *config.Config) error {
 	username, _ := gh.CheckAuth()
 
 	m := dashModel{
-		cfg:        cfg,
-		db:         db,
-		username:   username,
-		loading:    true,
-		spinFrames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		cfg:         cfg,
+		db:          db,
+		username:    username,
+		loading:     true,
+		aiAvailable: ai.Available(),
+		spinFrames:  []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -392,6 +410,8 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.viewMode == viewDetail {
 				m.viewMode = viewList
 				m.detailPR = nil
+				m.aiAnalysis = nil
+				m.aiThread = nil
 				return m, nil
 			}
 			return m, tea.Quit
@@ -399,6 +419,8 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.viewMode == viewDetail {
 				m.viewMode = viewList
 				m.detailPR = nil
+				m.aiAnalysis = nil
+				m.aiThread = nil
 				return m, nil
 			}
 		case "tab":
@@ -452,6 +474,39 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Checkout PR branch locally
 			if m.section != sectionWorkspace {
 				return m, m.checkoutPRCmd()
+			}
+		case "A":
+			// AI analysis
+			if m.aiAvailable && m.viewMode == viewDetail && m.detailPR != nil {
+				m.aiLoading = true
+				m.aiAnalysis = nil
+				m.aiThread = nil
+				pr := m.detailPR
+				repoPath := m.findLocalRepo(pr.Repo)
+				return m, func() tea.Msg {
+					analysis, err := ai.AnalyzePR(pr.Repo, pr.Number, repoPath)
+					return aiAnalysisDoneMsg{analysis: analysis, err: err}
+				}
+			} else if m.aiAvailable && m.viewMode == viewDetail && len(m.detailThreads) > 0 {
+				// Analyze the selected thread
+				m.aiLoading = true
+				m.aiThread = nil
+				pr := m.detailPR
+				repoPath := m.findLocalRepo(pr.Repo)
+				unresolvedIdx := 0
+				for _, t := range m.detailThreads {
+					if t.IsResolved {
+						continue
+					}
+					if unresolvedIdx == m.threadCursor {
+						thread := t
+						return m, func() tea.Msg {
+							analysis, err := ai.AnalyzeThread(pr.Repo, pr.Number, thread, repoPath)
+							return aiThreadDoneMsg{analysis: analysis, err: err}
+						}
+					}
+					unresolvedIdx++
+				}
 			}
 		case "/":
 			// Enter search mode (search org repos to clone)
@@ -545,6 +600,24 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("✓ Checked out %s on %s", msg.branch, msg.repo)
 		}
 		return m, scanWorkspace(m.cfg)
+
+	case aiAnalysisDoneMsg:
+		m.aiLoading = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("✗ AI analysis failed: %v", msg.err)
+		} else {
+			m.aiAnalysis = msg.analysis
+			m.statusMsg = "✓ AI analysis complete"
+		}
+
+	case aiThreadDoneMsg:
+		m.aiLoading = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("✗ AI thread analysis failed: %v", msg.err)
+		} else {
+			m.aiThread = msg.analysis
+			m.statusMsg = "✓ Thread analysis complete"
+		}
 	}
 
 	return m, nil
@@ -1424,6 +1497,63 @@ func (m dashModel) viewDetail() string {
 		}
 	}
 
+	// AI Analysis (if available)
+	if m.aiLoading {
+		s.WriteString(fmt.Sprintf("\n  %s %s Analyzing with Claude Code...\n",
+			threadHeaderStyle.Render("🤖 AI Analysis"),
+			m.spinFrames[m.spinner%len(m.spinFrames)]))
+	} else if m.aiAnalysis != nil {
+		a := m.aiAnalysis
+		s.WriteString("\n" + threadHeaderStyle.Render("  🤖 AI Analysis") + "\n\n")
+
+		if a.Summary != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Summary"), detailValueStyle.Render(a.Summary)))
+		}
+		if a.ActionNeeded != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Next Action"), wsCleanStyle.Render(a.ActionNeeded)))
+		}
+		if a.ReviewSummary != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Reviews"), detailValueStyle.Render(a.ReviewSummary)))
+		}
+		if a.RiskLevel != "" {
+			riskStyle := wsCleanStyle
+			if a.RiskLevel == "medium" {
+				riskStyle = wsDirtyStyle
+			} else if a.RiskLevel == "high" {
+				riskStyle = wsBehindStyle
+			}
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Risk"), riskStyle.Render(a.RiskLevel)))
+		}
+		if a.BlockedBy != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Blocked By"), wsBehindStyle.Render(a.BlockedBy)))
+		}
+		if len(a.SuggestedFixes) > 0 {
+			s.WriteString(fmt.Sprintf("  %s\n", detailLabelStyle.Render("Suggestions")))
+			for _, fix := range a.SuggestedFixes {
+				s.WriteString(fmt.Sprintf("    → %s\n", detailValueStyle.Render(fix)))
+			}
+		}
+	}
+
+	// AI Thread Analysis (if available)
+	if m.aiThread != nil {
+		t := m.aiThread
+		s.WriteString("\n" + threadHeaderStyle.Render("  🤖 Thread Analysis") + "\n\n")
+		if t.Intent != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Intent"), detailValueStyle.Render(t.Intent)))
+		}
+		if t.Complexity != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Complexity"), detailValueStyle.Render(t.Complexity)))
+		}
+		if t.Suggestion != "" {
+			s.WriteString(fmt.Sprintf("  %s %s\n", detailLabelStyle.Render("Approach"), wsCleanStyle.Render(t.Suggestion)))
+		}
+		if t.DraftReply != "" {
+			s.WriteString(fmt.Sprintf("\n  %s\n", detailLabelStyle.Render("Draft Reply")))
+			s.WriteString(fmt.Sprintf("  %s\n", threadBodyStyle.Render(t.DraftReply)))
+		}
+	}
+
 	// URL
 	s.WriteString(fmt.Sprintf("\n  %s %s\n", detailLabelStyle.Render("URL"), urlStyle.Render(pr.URL)))
 
@@ -1474,9 +1604,15 @@ func (m dashModel) renderHelp() string {
 func (m dashModel) renderDetailHelp() string {
 	pairs := []string{
 		helpPair("o", "open in browser"),
+		helpPair("c", "checkout"),
+	}
+	if m.aiAvailable {
+		pairs = append(pairs, helpPair("A", "AI analyze"))
+	}
+	pairs = append(pairs,
 		helpPair("esc", "back"),
 		helpPair("q", "quit"),
-	}
+	)
 	return helpStyle.Render("  " + strings.Join(pairs, "  "))
 }
 

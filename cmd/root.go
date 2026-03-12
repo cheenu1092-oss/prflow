@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cheenu1092-oss/prflow/internal/ai"
 	"github.com/cheenu1092-oss/prflow/internal/config"
+	"github.com/cheenu1092-oss/prflow/internal/deps"
 	"github.com/cheenu1092-oss/prflow/internal/tui"
 )
 
@@ -22,6 +24,8 @@ func Execute() error {
 			return runList()
 		case "config":
 			return runConfig()
+		case "doctor":
+			return runDoctor()
 		default:
 			fmt.Printf("Unknown command: %s\n", os.Args[1])
 			printUsage()
@@ -69,6 +73,30 @@ func runConfig() error {
 	return nil
 }
 
+func runDoctor() error {
+	fmt.Println(deps.PrintStatus())
+
+	if ai.Available() {
+		fmt.Println("🤖 AI features: ENABLED")
+		fmt.Println("   Claude Code detected — PR analysis, review assistance, and auto-fix available.")
+	} else {
+		fmt.Println("🤖 AI features: DISABLED (optional)")
+		fmt.Println("   Install Claude Code for AI-powered PR analysis:")
+		fmt.Println("   npm install -g @anthropic-ai/claude-code")
+		fmt.Println("   Then run: claude  (to complete auth)")
+		fmt.Println("")
+		fmt.Println("   Without it, PRFlow works as a standard PR dashboard.")
+	}
+
+	if err := deps.CheckRequired(); err != nil {
+		fmt.Printf("\n⚠️  %v\n", err)
+		return err
+	}
+
+	fmt.Println("\n✓ All required dependencies OK")
+	return nil
+}
+
 func printUsage() {
 	fmt.Println(`Usage: prflow [command]
 
@@ -78,5 +106,6 @@ Commands:
   sync      Force refresh PR cache
   ls        Quick list (no TUI)
   config    Show config path
+  doctor    Check dependencies (gh, git, claude)
   version   Print version`)
 }

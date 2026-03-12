@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cheenu1092-oss/prflow/internal/config"
+	"github.com/cheenu1092-oss/prflow/internal/deps"
 	"github.com/cheenu1092-oss/prflow/internal/gh"
 )
 
@@ -638,17 +639,24 @@ func (m onboardModel) viewSelectFavorites() string {
 func (m onboardModel) viewDone() string {
 	selected := m.selectedRepos()
 	starred := m.starredRepos()
+
+	aiStatus := "  ○ Claude Code not found (AI features disabled)\n    Install: npm install -g @anthropic-ai/claude-code\n"
+	if deps.HasClaudeCode() {
+		aiStatus = "  ✓ Claude Code detected — AI features enabled!\n"
+	}
+
 	return fmt.Sprintf(`  Setup Complete! ✓
 
   ✓ Authenticated as @%s
   ✓ Config saved to %s
   ✓ Tracking %d repos (%d favorites)
-
+%s
   %s
 `,
 		m.username,
 		config.Path(),
 		len(selected),
 		len(starred),
+		aiStatus,
 		helpStyle.Render("[enter] launch PRFlow!"))
 }
