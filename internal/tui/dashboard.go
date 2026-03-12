@@ -122,48 +122,85 @@ func (m dashModel) Init() tea.Cmd {
 
 func syncPRs(db *cache.DB) tea.Cmd {
 	return func() tea.Msg {
-		// Fetch my PRs
-		myPRs, err := gh.SearchMyPRs()
-		if err != nil {
-			return syncDoneMsg{err: err}
-		}
-
-		// Fetch review requests
-		reviewPRs, err := gh.SearchReviewRequests()
-		if err != nil {
-			return syncDoneMsg{err: err}
-		}
-
 		var doNow, waiting, review, done []cache.CachedPR
+		seenPRs := make(map[string]bool) // "repo#number" -> true
 
-		for i := range myPRs {
-			pr := &myPRs[i]
-			cached := cache.CachedPR{
-				PR:   *pr,
-				Repo: pr.Repository.NameWithOwner,
-			}
+		// Step 1: Search for my authored PRs
+		myPRs, _ := gh.SearchMyPRs()
 
-			// Classify
-			switch {
-			case pr.ReviewDecision == "CHANGES_REQUESTED":
-				cached.Section = "do_now"
-				doNow = append(doNow, cached)
-			case pr.ReviewDecision == "APPROVED":
-				cached.Section = "do_now" // ready to merge
-				doNow = append(doNow, cached)
-			case pr.Mergeable == "CONFLICTING":
-				cached.Section = "do_now"
-				doNow = append(doNow, cached)
-			default:
-				cached.Section = "waiting"
-				waiting = append(waiting, cached)
-			}
-
-			db.UpsertPR(pr, cached.Repo, cached.Section)
+		// Step 2: For each unique repo found, get detailed PR info
+		repoSet := make(map[string]bool)
+		for _, pr := range myPRs {
+			repoSet[pr.Repository.NameWithOwner] = true
 		}
 
+		// Get rich PR data per repo (has reviewDecision, isDraft, etc.)
+		for repo := range repoSet {
+			repoPRs, err := gh.ListPRsForRepo(repo)
+			if err != nil {
+				continue
+			}
+			for i := range repoPRs {
+				pr := &repoPRs[i]
+				key := fmt.Sprintf("%s#%d", repo, pr.Number)
+				if seenPRs[key] {
+					continue
+				}
+				seenPRs[key] = true
+
+				cached := cache.CachedPR{
+					PR:   *pr,
+					Repo: repo,
+				}
+
+				// Classify based on rich data
+				switch {
+				case pr.ReviewDecision == "CHANGES_REQUESTED":
+					cached.Section = "do_now"
+					doNow = append(doNow, cached)
+				case pr.ReviewDecision == "APPROVED":
+					cached.Section = "do_now"
+					doNow = append(doNow, cached)
+				case pr.Mergeable == "CONFLICTING":
+					cached.Section = "do_now"
+					doNow = append(doNow, cached)
+				default:
+					cached.Section = "waiting"
+					waiting = append(waiting, cached)
+				}
+
+				db.UpsertPR(pr, repo, cached.Section)
+			}
+		}
+
+		// If per-repo fetch didn't work, fall back to search results
+		if len(doNow) == 0 && len(waiting) == 0 {
+			for i := range myPRs {
+				pr := &myPRs[i]
+				key := fmt.Sprintf("%s#%d", pr.Repository.NameWithOwner, pr.Number)
+				if seenPRs[key] {
+					continue
+				}
+				seenPRs[key] = true
+				cached := cache.CachedPR{
+					PR:      *pr,
+					Repo:    pr.Repository.NameWithOwner,
+					Section: "waiting",
+				}
+				waiting = append(waiting, cached)
+				db.UpsertPR(pr, cached.Repo, "waiting")
+			}
+		}
+
+		// Step 3: Get review requests
+		reviewPRs, _ := gh.SearchReviewRequests()
 		for i := range reviewPRs {
 			pr := &reviewPRs[i]
+			key := fmt.Sprintf("%s#%d", pr.Repository.NameWithOwner, pr.Number)
+			if seenPRs[key] {
+				continue
+			}
+			seenPRs[key] = true
 			cached := cache.CachedPR{
 				PR:      *pr,
 				Repo:    pr.Repository.NameWithOwner,

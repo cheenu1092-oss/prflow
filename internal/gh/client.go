@@ -134,18 +134,41 @@ type ThreadComment struct {
 
 // SearchMyPRs returns all open PRs authored by the current user
 func SearchMyPRs() ([]PR, error) {
+	// gh search prs has limited --json fields. Use only valid ones.
 	out, err := run("search", "prs",
 		"--author=@me",
 		"--state=open",
-		"--json", "number,title,state,url,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,isDraft,repository",
 		"--limit", "100",
+		"--json", "number,title,state,url,repository,createdAt,updatedAt",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("search PRs failed: %w", err)
+		// Fallback: try using gh api directly
+		return searchPRsViaAPI("author:@me")
 	}
-	var prs []PR
-	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+	var results []struct {
+		Number     int    `json:"number"`
+		Title      string `json:"title"`
+		State      string `json:"state"`
+		URL        string `json:"url"`
+		CreatedAt  string `json:"createdAt"`
+		UpdatedAt  string `json:"updatedAt"`
+		Repository RepoRef `json:"repository"`
+	}
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
 		return nil, fmt.Errorf("parse PRs failed: %w", err)
+	}
+
+	var prs []PR
+	for _, r := range results {
+		prs = append(prs, PR{
+			Number:    r.Number,
+			Title:     r.Title,
+			State:     r.State,
+			URL:       r.URL,
+			CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt,
+			Repository: r.Repository,
+		})
 	}
 	return prs, nil
 }
@@ -155,15 +178,110 @@ func SearchReviewRequests() ([]PR, error) {
 	out, err := run("search", "prs",
 		"--review-requested=@me",
 		"--state=open",
-		"--json", "number,title,state,url,headRefName,baseRefName,author,createdAt,updatedAt,repository",
 		"--limit", "100",
+		"--json", "number,title,state,url,repository,createdAt,updatedAt",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("search review requests failed: %w", err)
+		return searchPRsViaAPI("review-requested:@me")
+	}
+	var results []struct {
+		Number     int    `json:"number"`
+		Title      string `json:"title"`
+		State      string `json:"state"`
+		URL        string `json:"url"`
+		CreatedAt  string `json:"createdAt"`
+		UpdatedAt  string `json:"updatedAt"`
+		Repository RepoRef `json:"repository"`
+	}
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
+		return nil, fmt.Errorf("parse review requests failed: %w", err)
+	}
+
+	var prs []PR
+	for _, r := range results {
+		prs = append(prs, PR{
+			Number:    r.Number,
+			Title:     r.Title,
+			State:     r.State,
+			URL:       r.URL,
+			CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt,
+			Repository: r.Repository,
+		})
+	}
+	return prs, nil
+}
+
+// searchPRsViaAPI is a fallback that uses GitHub search API directly
+func searchPRsViaAPI(qualifier string) ([]PR, error) {
+	out, err := run("api", "search/issues",
+		"-X", "GET",
+		"-f", fmt.Sprintf("q=is:pr is:open %s", qualifier),
+		"-f", "per_page=100",
+		"--jq", ".items[] | {number, title, state, html_url, created_at, updated_at, repository_url}",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("API search failed: %w", err)
+	}
+	if out == "" {
+		return []PR{}, nil
+	}
+
+	// Parse line-by-line JSON objects
+	var prs []PR
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var item struct {
+			Number        int    `json:"number"`
+			Title         string `json:"title"`
+			State         string `json:"state"`
+			HTMLURL       string `json:"html_url"`
+			CreatedAt     string `json:"created_at"`
+			UpdatedAt     string `json:"updated_at"`
+			RepositoryURL string `json:"repository_url"`
+		}
+		if err := json.Unmarshal([]byte(line), &item); err != nil {
+			continue
+		}
+		// Extract repo name from URL: https://api.github.com/repos/org/repo
+		repoName := ""
+		parts := strings.Split(item.RepositoryURL, "/repos/")
+		if len(parts) == 2 {
+			repoName = parts[1]
+		}
+		prs = append(prs, PR{
+			Number:    item.Number,
+			Title:     item.Title,
+			State:     item.State,
+			URL:       item.HTMLURL,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+			Repository: RepoRef{NameWithOwner: repoName},
+		})
+	}
+	return prs, nil
+}
+
+// ListPRsForRepo lists open PRs for a specific repo (more reliable than search)
+func ListPRsForRepo(repo string) ([]PR, error) {
+	out, err := run("pr", "list",
+		"-R", repo,
+		"--state", "open",
+		"--json", "number,title,state,url,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,isDraft",
+		"--limit", "50",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list PRs for %s failed: %w", repo, err)
 	}
 	var prs []PR
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
-		return nil, fmt.Errorf("parse review requests failed: %w", err)
+		return nil, fmt.Errorf("parse PRs failed: %w", err)
+	}
+	for i := range prs {
+		prs[i].Repository.NameWithOwner = repo
 	}
 	return prs, nil
 }
