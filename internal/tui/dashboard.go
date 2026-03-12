@@ -481,22 +481,39 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.checkoutPRCmd()
 			}
 		case "a":
-			// Approve PR (only in detail view)
+			// Approve PR (only in detail view, not draft)
 			if m.viewMode == viewDetail && m.detailPR != nil {
 				pr := m.detailPR
+				if pr.IsDraft {
+					m.statusMsg = "✗ Cannot approve draft PR"
+					return m, nil
+				}
 				return m, func() tea.Msg {
 					err := gh.ApprovePR(pr.Repo, pr.Number, "")
 					return prActionDoneMsg{action: "approved", err: err}
 				}
 			}
 		case "m":
-			// Merge PR (only in detail view)
+			// Merge PR (only in detail view, not draft, requires confirmation)
 			if m.viewMode == viewDetail && m.detailPR != nil {
 				pr := m.detailPR
-				// Default to squash merge (most common)
-				return m, func() tea.Msg {
-					err := gh.MergePR(pr.Repo, pr.Number, "squash", false)
-					return prActionDoneMsg{action: "merged", err: err}
+				if pr.IsDraft {
+					m.statusMsg = "✗ Cannot merge draft PR"
+					return m, nil
+				}
+				// Simple confirmation: user must press 'm' twice in a row
+				// If statusMsg contains "Press 'm' again to confirm", proceed
+				// Otherwise, set confirmation message
+				if m.statusMsg == "⚠️ Press 'm' again to confirm merge (squash)" {
+					m.statusMsg = "Merging..."
+					// Default to squash merge (most common)
+					return m, func() tea.Msg {
+						err := gh.MergePR(pr.Repo, pr.Number, "squash", false)
+						return prActionDoneMsg{action: "merged", err: err}
+					}
+				} else {
+					m.statusMsg = "⚠️ Press 'm' again to confirm merge (squash)"
+					return m, nil
 				}
 			}
 		case "r":
@@ -509,6 +526,11 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if unresolvedIdx == m.threadCursor {
 						threadID := t.ID
+						// Validate threadID before calling GraphQL
+						if threadID == "" {
+							m.statusMsg = "✗ Thread ID is empty"
+							return m, nil
+						}
 						return m, func() tea.Msg {
 							err := gh.ResolveThread(threadID)
 							return prActionDoneMsg{action: "resolved thread", err: err}
