@@ -243,3 +243,48 @@ func TestGetReviewThreadsInvalidRepo(t *testing.T) {
 		t.Error("expected error for invalid repo format")
 	}
 }
+
+func TestSearchOrgReposSuccess(t *testing.T) {
+	mock := NewMockRunner()
+	mock.When("search repos", `[
+		{"nameWithOwner": "org/api"},
+		{"nameWithOwner": "org/web"}
+	]`, nil)
+
+	old := defaultRunner
+	SetRunner(mock)
+	defer SetRunner(old)
+
+	repos, err := SearchOrgRepos("org")
+	if err != nil {
+		t.Fatalf("SearchOrgRepos failed: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(repos))
+	}
+	if repos[0] != "org/api" {
+		t.Errorf("expected org/api, got %q", repos[0])
+	}
+}
+
+func TestSearchMergedPRsSuccess(t *testing.T) {
+	mock := NewMockRunner()
+	mock.When("search prs", `[
+		{"number": 100, "title": "Shipped feature", "state": "closed", "url": "https://github.com/org/repo/pull/100", "repository": {"nameWithOwner": "org/repo"}}
+	]`, nil)
+
+	old := defaultRunner
+	SetRunner(mock)
+	defer SetRunner(old)
+
+	prs, err := SearchMergedPRs()
+	if err != nil {
+		t.Fatalf("SearchMergedPRs failed: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].Number != 100 {
+		t.Errorf("expected #100, got #%d", prs[0].Number)
+	}
+}

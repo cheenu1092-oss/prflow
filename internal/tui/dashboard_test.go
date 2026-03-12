@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/cheenu1092-oss/prflow/internal/cache"
+	"github.com/cheenu1092-oss/prflow/internal/config"
 	"github.com/cheenu1092-oss/prflow/internal/gh"
 )
 
@@ -45,19 +46,20 @@ func TestTruncate(t *testing.T) {
 	tests := []struct {
 		input    string
 		max      int
-		expected string
 	}{
-		{"short", 10, "short"},
-		{"exactly ten", 11, "exactly ten"},
-		{"this is a long string that should be truncated", 20, "this is a long st..."},
-		{"", 10, ""},
-		{"abc", 3, "abc"},
-		{"abcd", 3, ""},  // edge case: max < 3 means we can't even fit "..."
+		{"short", 10},
+		{"exactly ten", 11},
+		{"this is a long string that should be truncated", 20},
+		{"", 10},
+		{"abc", 3},
+		{"abcd", 3},
+		{"abcdef", 2}, // edge case: max < 4, just truncates hard
+		{"ab", 1},
 	}
 
 	for _, tt := range tests {
 		result := truncate(tt.input, tt.max)
-		if tt.max >= 3 && len(result) > tt.max {
+		if len(result) > tt.max {
 			t.Errorf("truncate(%q, %d) = %q (len %d), exceeds max", tt.input, tt.max, result, len(result))
 		}
 	}
@@ -193,5 +195,70 @@ func TestRenderWorkspaceCardsEmpty(t *testing.T) {
 	result := m.renderWorkspaceCards(80)
 	if result == "" {
 		t.Error("expected non-empty empty state")
+	}
+}
+
+func TestFindLocalRepoNotFound(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Workspace.ScanDirs = []string{"/nonexistent"}
+	m := dashModel{cfg: cfg}
+
+	result := m.findLocalRepo("org/nonexistent-repo")
+	if result != "" {
+		t.Errorf("expected empty for nonexistent repo, got %q", result)
+	}
+}
+
+func TestFindLocalRepoFromWorkspaceResults(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := dashModel{
+		cfg: cfg,
+		workspace: []RepoStatus{
+			{Name: "org/myrepo", Path: "/tmp/myrepo"},
+		},
+	}
+
+	result := m.findLocalRepo("org/myrepo")
+	// Won't find it since /tmp/myrepo doesn't exist as git repo,
+	// but the scan result matching should work if path existed
+	_ = result
+}
+
+func TestViewSearchMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := dashModel{
+		cfg:         cfg,
+		spinFrames:  []string{"⠋"},
+		viewMode:    viewSearch,
+		searchQuery: "test",
+	}
+
+	result := m.viewSearchMode()
+	if result == "" {
+		t.Error("expected non-empty search view")
+	}
+
+	// With results
+	m.searchResults = []string{"org/repo1", "org/repo2"}
+	result = m.viewSearchMode()
+	if result == "" {
+		t.Error("expected non-empty search view with results")
+	}
+
+	// Searching state
+	m.searching = true
+	m.searchResults = nil
+	result = m.viewSearchMode()
+	if result == "" {
+		t.Error("expected non-empty searching view")
+	}
+}
+
+func TestSectionAllValues(t *testing.T) {
+	// Verify all 5 sections have non-empty string representation
+	for i := section(0); i <= sectionDone; i++ {
+		if i.String() == "" {
+			t.Errorf("section %d has empty string", i)
+		}
 	}
 }

@@ -45,6 +45,7 @@ type viewMode int
 const (
 	viewList viewMode = iota
 	viewDetail
+	viewSearch
 )
 
 type dashModel struct {
@@ -68,6 +69,12 @@ type dashModel struct {
 	detailPR      *cache.CachedPR
 	detailThreads []gh.ReviewThread
 	threadCursor  int
+
+	// Search mode
+	searchQuery   string
+	searchResults []string
+	searchCursor  int
+	searching     bool
 
 	// State
 	loading    bool
@@ -101,6 +108,23 @@ type detailLoadedMsg struct {
 type gitOpDoneMsg struct {
 	msg string
 	err error
+}
+
+type searchResultsMsg struct {
+	repos []string
+	err   error
+}
+
+type cloneDoneMsg struct {
+	repo string
+	path string
+	err  error
+}
+
+type checkoutDoneMsg struct {
+	repo   string
+	branch string
+	err    error
 }
 
 type dashTickMsg time.Time
@@ -240,6 +264,18 @@ func syncPRs(db *cache.DB, cfg *config.Config) tea.Cmd {
 			db.UpsertPR(pr, cached.Repo, "review")
 		}
 
+		// Step 4: Get recently merged PRs for Done section
+		mergedPRs, _ := gh.SearchMergedPRs()
+		for _, pr := range mergedPRs {
+			pr := pr
+			cached := cache.CachedPR{
+				PR:      pr,
+				Repo:    pr.Repository.NameWithOwner,
+				Section: "done",
+			}
+			done = append(done, cached)
+		}
+
 		return syncDoneMsg{
 			doNow:   doNow,
 			waiting: waiting,
@@ -288,6 +324,18 @@ func scanDir(dir string) ([]string, error) {
 		path := dir + "/" + name
 		if isGitRepo(path) {
 			repos = append(repos, path)
+		} else {
+			// Scan 2 levels deep (e.g., ~/repos/org/repo)
+			subEntries, err := readDirNames(path)
+			if err != nil {
+				continue
+			}
+			for _, subName := range subEntries {
+				subPath := path + "/" + subName
+				if isGitRepo(subPath) {
+					repos = append(repos, subPath)
+				}
+			}
 		}
 	}
 	return repos, nil
@@ -323,6 +371,11 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, dashTickCmd()
 
 	case tea.KeyMsg:
+		// Search mode handles its own keys
+		if m.viewMode == viewSearch {
+			return m.updateSearch(msg)
+		}
+
 		// Clear status message on any keypress
 		m.statusMsg = ""
 
@@ -382,6 +435,24 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "o":
 			m.openInBrowser()
+		case "c":
+			// Checkout PR branch locally
+			if m.section != sectionWorkspace {
+				return m, m.checkoutPRCmd()
+			}
+		case "/":
+			// Enter search mode (search org repos to clone)
+			m.viewMode = viewSearch
+			m.searchQuery = ""
+			m.searchResults = nil
+			m.searchCursor = 0
+			m.searching = false
+			return m, nil
+		case "C":
+			// Clone the repo of the selected PR
+			if m.section != sectionWorkspace {
+				return m, m.cloneCurrentPRRepo()
+			}
 		case "R":
 			m.loading = true
 			m.err = ""
@@ -435,6 +506,32 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Re-scan workspace after git ops
 		return m, scanWorkspace(m.cfg)
+
+	case searchResultsMsg:
+		m.searching = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Search failed: %v", msg.err)
+		} else {
+			m.searchResults = msg.repos
+			m.searchCursor = 0
+		}
+
+	case cloneDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("✗ Clone %s failed: %v", msg.repo, msg.err)
+		} else {
+			m.statusMsg = fmt.Sprintf("✓ Cloned %s → %s", msg.repo, msg.path)
+			m.viewMode = viewList
+		}
+		return m, scanWorkspace(m.cfg)
+
+	case checkoutDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("✗ Checkout failed: %v", msg.err)
+		} else {
+			m.statusMsg = fmt.Sprintf("✓ Checked out %s on %s", msg.branch, msg.repo)
+		}
+		return m, scanWorkspace(m.cfg)
 	}
 
 	return m, nil
@@ -472,9 +569,10 @@ func (m *dashModel) openDetail() (tea.Model, tea.Cmd) {
 			pr = &m.review[m.cursor]
 		}
 	case sectionWorkspace:
-		// Workspace items open in browser
+		// Workspace items show path info and open in browser
 		if m.cursor < len(m.workspace) {
 			ws := m.workspace[m.cursor]
+			m.statusMsg = fmt.Sprintf("📁 %s", ws.Path)
 			if ws.HasRemote {
 				gh.OpenInBrowser(fmt.Sprintf("https://github.com/%s", ws.Name))
 			}
@@ -567,12 +665,290 @@ func (m *dashModel) fetchAllCmd() tea.Cmd {
 	}
 }
 
+// updateSearch handles key input in search mode
+func (m *dashModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.viewMode = viewList
+		return m, nil
+	case "enter":
+		if len(m.searchResults) > 0 && m.searchCursor < len(m.searchResults) {
+			// Clone selected repo
+			repo := m.searchResults[m.searchCursor]
+			m.statusMsg = fmt.Sprintf("Cloning %s...", repo)
+			return m, m.cloneRepoCmd(repo)
+		}
+		if len(m.searchQuery) > 0 && !m.searching {
+			// Execute search
+			m.searching = true
+			q := m.searchQuery
+			return m, func() tea.Msg {
+				repos, err := gh.SearchOrgRepos(q)
+				return searchResultsMsg{repos: repos, err: err}
+			}
+		}
+	case "up", "k":
+		if m.searchCursor > 0 {
+			m.searchCursor--
+		}
+	case "down", "j":
+		if len(m.searchResults) > 0 && m.searchCursor < len(m.searchResults)-1 {
+			m.searchCursor++
+		}
+	case "backspace":
+		if len(m.searchQuery) > 0 {
+			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+			m.searchResults = nil
+		}
+	default:
+		ch := msg.String()
+		if len(ch) == 1 && ch[0] >= 32 {
+			m.searchQuery += ch
+			m.searchResults = nil
+		}
+	}
+	return m, nil
+}
+
+func (m *dashModel) checkoutPRCmd() tea.Cmd {
+	var pr *cache.CachedPR
+	switch m.section {
+	case sectionDoNow:
+		if m.cursor < len(m.doNow) {
+			pr = &m.doNow[m.cursor]
+		}
+	case sectionWaiting:
+		if m.cursor < len(m.waiting) {
+			pr = &m.waiting[m.cursor]
+		}
+	case sectionReview:
+		if m.cursor < len(m.review) {
+			pr = &m.review[m.cursor]
+		}
+	case sectionDone:
+		if m.cursor < len(m.done) {
+			pr = &m.done[m.cursor]
+		}
+	}
+	if pr == nil {
+		return nil
+	}
+
+	repo := pr.Repo
+	branch := pr.HeadRefName
+	number := pr.Number
+
+	// First, try to find the repo locally in workspace
+	localPath := m.findLocalRepo(repo)
+
+	if localPath != "" {
+		// Found locally — checkout the branch
+		m.statusMsg = fmt.Sprintf("Checking out %s in %s...", branch, localPath)
+		return func() tea.Msg {
+			// Fetch first to get latest branches
+			gitCmd(localPath, "fetch", "--all")
+			// Try checking out the branch
+			_, err := gitCmd(localPath, "checkout", branch)
+			if err != nil {
+				// Branch might not exist locally, try creating from remote
+				_, err = gitCmd(localPath, "checkout", "-b", branch, "origin/"+branch)
+			}
+			return checkoutDoneMsg{repo: repo, branch: branch, err: err}
+		}
+	}
+
+	// Not found locally — use gh pr checkout (clones if needed)
+	m.statusMsg = fmt.Sprintf("Checking out PR #%d from %s...", number, repo)
+	reposDir := m.cfg.Settings.ReposDir
+	return func() tea.Msg {
+		// Clone to reposDir first, then checkout
+		dest := reposDir + "/" + repo
+		if !isGitRepo(dest) {
+			err := gh.CloneRepo(repo, dest)
+			if err != nil {
+				return checkoutDoneMsg{repo: repo, branch: branch, err: fmt.Errorf("clone failed: %w", err)}
+			}
+		}
+		// Now checkout the branch
+		gitCmd(dest, "fetch", "--all")
+		_, err := gitCmd(dest, "checkout", branch)
+		if err != nil {
+			_, err = gitCmd(dest, "checkout", "-b", branch, "origin/"+branch)
+		}
+		return checkoutDoneMsg{repo: repo, branch: branch, err: err}
+	}
+}
+
+func (m *dashModel) cloneCurrentPRRepo() tea.Cmd {
+	var repo string
+	switch m.section {
+	case sectionDoNow:
+		if m.cursor < len(m.doNow) {
+			repo = m.doNow[m.cursor].Repo
+		}
+	case sectionWaiting:
+		if m.cursor < len(m.waiting) {
+			repo = m.waiting[m.cursor].Repo
+		}
+	case sectionReview:
+		if m.cursor < len(m.review) {
+			repo = m.review[m.cursor].Repo
+		}
+	case sectionDone:
+		if m.cursor < len(m.done) {
+			repo = m.done[m.cursor].Repo
+		}
+	}
+	if repo == "" {
+		return nil
+	}
+	return m.cloneRepoCmd(repo)
+}
+
+func (m *dashModel) cloneRepoCmd(repo string) tea.Cmd {
+	reposDir := m.cfg.Settings.ReposDir
+	dest := reposDir + "/" + repo
+	m.statusMsg = fmt.Sprintf("Cloning %s...", repo)
+	return func() tea.Msg {
+		err := gh.CloneRepo(repo, dest)
+		return cloneDoneMsg{repo: repo, path: dest, err: err}
+	}
+}
+
+// findLocalRepo searches workspace scan dirs for a repo matching the given name
+func (m *dashModel) findLocalRepo(repo string) string {
+	// Check explicit workspace repos mapping first
+	if path, ok := m.cfg.Workspace.Repos[repo]; ok {
+		if isGitRepo(path) {
+			return path
+		}
+	}
+
+	// Extract just the repo name for matching
+	parts := strings.Split(repo, "/")
+	repoName := repo
+	if len(parts) == 2 {
+		repoName = parts[1]
+	}
+
+	// Search scan dirs
+	for _, dir := range m.cfg.Workspace.ScanDirs {
+		// Check direct: dir/repo-name
+		path := dir + "/" + repoName
+		if isGitRepo(path) {
+			return path
+		}
+		// Check org/repo structure: dir/org/repo
+		if len(parts) == 2 {
+			path = dir + "/" + parts[0] + "/" + parts[1]
+			if isGitRepo(path) {
+				return path
+			}
+		}
+	}
+
+	// Check in the configured repos dir
+	reposDir := m.cfg.Settings.ReposDir
+	if reposDir != "" {
+		path := reposDir + "/" + repo
+		if isGitRepo(path) {
+			return path
+		}
+		path = reposDir + "/" + repoName
+		if isGitRepo(path) {
+			return path
+		}
+	}
+
+	// Also check workspace scan results
+	for _, ws := range m.workspace {
+		if ws.Name == repo || ws.Name == repoName {
+			return ws.Path
+		}
+	}
+
+	return ""
+}
+
 // View renders the dashboard
 func (m dashModel) View() string {
+	if m.viewMode == viewSearch {
+		return m.viewSearchMode()
+	}
 	if m.viewMode == viewDetail && m.detailPR != nil {
 		return m.viewDetail()
 	}
 	return m.viewDashboard()
+}
+
+func (m dashModel) viewSearchMode() string {
+	width := m.width
+	if width < 60 {
+		width = 80
+	}
+
+	var s strings.Builder
+
+	header := headerStyle.Width(width).Render(" 🔍 Search Repos")
+	s.WriteString(header + "\n\n")
+
+	// Search input
+	cursor := "█"
+	if m.searching {
+		cursor = m.spinFrames[m.spinner%len(m.spinFrames)]
+	}
+	s.WriteString(fmt.Sprintf("  Search: %s%s\n\n", m.searchQuery, cursor))
+
+	if m.searching {
+		s.WriteString(fmt.Sprintf("  %s Searching...\n", m.spinFrames[m.spinner%len(m.spinFrames)]))
+	} else if len(m.searchResults) > 0 {
+		s.WriteString(fmt.Sprintf("  %d repos found:\n\n", len(m.searchResults)))
+
+		maxShow := m.height - 10
+		if maxShow < 5 {
+			maxShow = 15
+		}
+
+		for i, repo := range m.searchResults {
+			if i >= maxShow {
+				s.WriteString(fmt.Sprintf("\n  + %d more...\n", len(m.searchResults)-maxShow))
+				break
+			}
+			cursor := "  "
+			if i == m.searchCursor {
+				cursor = prTitleSelectedStyle.Render("▸ ")
+			}
+
+			// Check if repo exists locally
+			localPath := m.findLocalRepo(repo)
+			localTag := ""
+			if localPath != "" {
+				localTag = wsCleanStyle.Render(" (local)")
+			}
+
+			if i == m.searchCursor {
+				s.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, prTitleSelectedStyle.Render(repo), localTag))
+			} else {
+				s.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, repo, localTag))
+			}
+		}
+	} else if m.searchQuery != "" && !m.searching {
+		s.WriteString("  Press [enter] to search\n")
+	} else {
+		s.WriteString("  Type a query to search repos in your orgs.\n")
+		s.WriteString("  Select a result and press [enter] to clone.\n")
+	}
+
+	s.WriteString("\n")
+	s.WriteString(helpStyle.Render("  " + strings.Join([]string{
+		helpPair("enter", "search/clone"),
+		helpPair("↑↓", "nav"),
+		helpPair("esc", "back"),
+	}, "  ")))
+
+	return s.String()
 }
 
 func (m dashModel) viewDashboard() string {
@@ -1008,8 +1384,12 @@ func (m dashModel) renderHelp() string {
 		pairs = append(pairs, helpPair("p", "pull"))
 		pairs = append(pairs, helpPair("P", "push"))
 		pairs = append(pairs, helpPair("f", "fetch"))
+	} else {
+		pairs = append(pairs, helpPair("c", "checkout"))
+		pairs = append(pairs, helpPair("C", "clone"))
 	}
 
+	pairs = append(pairs, helpPair("/", "search"))
 	pairs = append(pairs, helpPair("R", "refresh"))
 	pairs = append(pairs, helpPair("q", "quit"))
 
@@ -1093,6 +1473,12 @@ func timeSinceStr(isoTime string) string {
 func truncate(s string, max int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
+	if max < 4 {
+		if len(s) > max {
+			return s[:max]
+		}
+		return s
+	}
 	if len(s) > max {
 		return s[:max-3] + "..."
 	}

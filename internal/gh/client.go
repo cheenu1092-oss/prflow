@@ -368,6 +368,9 @@ func GetReviewThreads(repo string, number int) ([]ReviewThread, error) {
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid repo format: %s", repo)
 	}
+	// Escape quotes in repo owner/name to prevent GraphQL injection
+	owner := strings.ReplaceAll(parts[0], `"`, `\"`)
+	name := strings.ReplaceAll(parts[1], `"`, `\"`)
 	query := fmt.Sprintf(`query {
 		repository(owner: "%s", name: "%s") {
 			pullRequest(number: %d) {
@@ -389,7 +392,7 @@ func GetReviewThreads(repo string, number int) ([]ReviewThread, error) {
 				}
 			}
 		}
-	}`, parts[0], parts[1], number)
+	}`, owner, name, number)
 
 	out, err := run("api", "graphql", "-f", fmt.Sprintf("query=%s", query))
 	if err != nil {
@@ -463,6 +466,103 @@ func ListUserRepos() ([]string, error) {
 		result[i] = r.NameWithOwner
 	}
 	return result, nil
+}
+
+// SearchOrgRepos searches repos in an org matching a query
+func SearchOrgRepos(query string) ([]string, error) {
+	// Search across all repos the user has access to
+	out, err := run("search", "repos",
+		query,
+		"--json", "nameWithOwner",
+		"--limit", "30",
+	)
+	if err != nil {
+		// Fallback: list org repos filtered
+		return searchOrgReposFallback(query)
+	}
+	var repos []struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	}
+	if err := json.Unmarshal([]byte(out), &repos); err != nil {
+		return nil, fmt.Errorf("parse search results failed: %w", err)
+	}
+	result := make([]string, len(repos))
+	for i, r := range repos {
+		result[i] = r.NameWithOwner
+	}
+	return result, nil
+}
+
+func searchOrgReposFallback(query string) ([]string, error) {
+	out, err := run("repo", "list", "--json", "nameWithOwner", "--limit", "200")
+	if err != nil {
+		return nil, err
+	}
+	var repos []struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	}
+	if err := json.Unmarshal([]byte(out), &repos); err != nil {
+		return nil, err
+	}
+	q := strings.ToLower(query)
+	var matches []string
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.NameWithOwner), q) {
+			matches = append(matches, r.NameWithOwner)
+		}
+	}
+	return matches, nil
+}
+
+// CloneRepo clones a repo into the given directory
+func CloneRepo(repo, destDir string) error {
+	_, err := run("repo", "clone", repo, destDir)
+	return err
+}
+
+// CheckoutPR checks out a PR branch locally
+func CheckoutPR(repo string, number int) error {
+	_, err := run("pr", "checkout", fmt.Sprintf("%d", number), "-R", repo)
+	return err
+}
+
+// SearchMergedPRs returns recently merged PRs by the current user
+func SearchMergedPRs() ([]PR, error) {
+	out, err := run("search", "prs",
+		"--author=@me",
+		"--merged",
+		"--limit", "20",
+		"--sort", "updated",
+		"--json", "number,title,state,url,repository,createdAt,updatedAt",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var results []struct {
+		Number     int     `json:"number"`
+		Title      string  `json:"title"`
+		State      string  `json:"state"`
+		URL        string  `json:"url"`
+		CreatedAt  string  `json:"createdAt"`
+		UpdatedAt  string  `json:"updatedAt"`
+		Repository RepoRef `json:"repository"`
+	}
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
+		return nil, err
+	}
+	var prs []PR
+	for _, r := range results {
+		prs = append(prs, PR{
+			Number:    r.Number,
+			Title:     r.Title,
+			State:     r.State,
+			URL:       r.URL,
+			CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt,
+			Repository: r.Repository,
+		})
+	}
+	return prs, nil
 }
 
 // OpenInBrowser opens a URL in the default browser (cross-platform)

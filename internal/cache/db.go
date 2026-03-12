@@ -18,11 +18,10 @@ type DB struct {
 
 type CachedPR struct {
 	gh.PR
-	Repo           string
-	Section        string // do_now, waiting, review, done
-	CIStatus       string
-	ReviewDecision string
-	FetchedAt      time.Time
+	Repo      string
+	Section   string // do_now, waiting, review, done
+	CIStatus  string
+	FetchedAt time.Time
 }
 
 func Open() (*DB, error) {
@@ -146,7 +145,7 @@ func (d *DB) GetPRsBySection(section string) ([]CachedPR, error) {
 		err := rows.Scan(
 			&p.Repo, &p.Number, &p.Title, &p.State, &p.Author.Login,
 			&p.HeadRefName, &p.BaseRefName, &p.URL,
-			&p.CreatedAt, &p.UpdatedAt, &p.Mergeable, &p.ReviewDecision,
+			&p.CreatedAt, &p.UpdatedAt, &p.Mergeable, &p.PR.ReviewDecision,
 			&p.CIStatus, &isDraft, &p.Section, &fetchedAt,
 		)
 		if err != nil {
@@ -178,7 +177,7 @@ func (d *DB) GetAllPRs() ([]CachedPR, error) {
 		err := rows.Scan(
 			&p.Repo, &p.Number, &p.Title, &p.State, &p.Author.Login,
 			&p.HeadRefName, &p.BaseRefName, &p.URL,
-			&p.CreatedAt, &p.UpdatedAt, &p.Mergeable, &p.ReviewDecision,
+			&p.CreatedAt, &p.UpdatedAt, &p.Mergeable, &p.PR.ReviewDecision,
 			&p.CIStatus, &isDraft, &p.Section, &fetchedAt,
 		)
 		if err != nil {

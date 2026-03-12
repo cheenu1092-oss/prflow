@@ -95,6 +95,9 @@ prflow version      # Print version
 | Key | Action |
 |-----|--------|
 | `o` | Open in GitHub.com (browser) |
+| `c` | Checkout PR branch locally (finds repo or clones) |
+| `C` | Clone PR's repo to repos dir |
+| `/` | Search org repos to clone |
 | `R` | Force refresh all data |
 
 ### Workspace (📂 section)
@@ -190,8 +193,11 @@ Local git state for all your repos:
 
 ## Roadmap
 
+- [x] **v0.2** — Checkout PR branch locally (auto-find or clone)
+- [x] **v0.2** — Search org repos + clone from TUI
+- [x] **v0.2** — Done section (recently merged PRs)
+- [x] **v0.2** — 2-level deep workspace scanning
 - [ ] **v0.2** — Reply to review comments from TUI
-- [ ] **v0.2** — Checkout PR branch (`gh pr checkout`)
 - [ ] **v0.2** — Merge from TUI
 - [ ] **v0.2** — Nudge stale reviewers
 - [ ] **v0.3** — Background auto-refresh
