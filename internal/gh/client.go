@@ -7,32 +7,50 @@ import (
 	"strings"
 )
 
-// CheckAuth verifies gh CLI is authenticated
+// CheckAuth verifies gh CLI is authenticated and returns the username
 func CheckAuth() (string, error) {
-	out, err := run("auth", "status", "--hostname", "github.com")
+	// First try: gh auth status (works on most versions)
+	out, err := run("auth", "status")
 	if err != nil {
-		return "", fmt.Errorf("gh auth failed: %w\n%s", err, out)
+		return "", fmt.Errorf("not authenticated: %s", out)
 	}
-	// Extract username from output
+
+	// Try to extract username from various output formats
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "Logged in to") {
-			parts := strings.Fields(line)
-			for i, p := range parts {
-				if p == "as" && i+1 < len(parts) {
-					return strings.TrimSpace(parts[i+1]), nil
-				}
-			}
-		}
+		line = strings.TrimSpace(line)
+		// Format: "Logged in to github.com account username ..."
 		if strings.Contains(line, "account") {
 			parts := strings.Fields(line)
 			for i, p := range parts {
 				if p == "account" && i+1 < len(parts) {
-					return strings.TrimSpace(parts[i+1]), nil
+					username := strings.Trim(parts[i+1], "().,")
+					if username != "" {
+						return username, nil
+					}
+				}
+			}
+		}
+		// Format: "Logged in to github.com as username ..."
+		if strings.Contains(line, " as ") {
+			parts := strings.Fields(line)
+			for i, p := range parts {
+				if p == "as" && i+1 < len(parts) {
+					username := strings.Trim(parts[i+1], "().,")
+					if username != "" {
+						return username, nil
+					}
 				}
 			}
 		}
 	}
-	return "unknown", nil
+
+	// Fallback: use gh api to get current user
+	apiOut, apiErr := run("api", "user", "--jq", ".login")
+	if apiErr == nil && apiOut != "" {
+		return strings.TrimSpace(apiOut), nil
+	}
+
+	return "user", nil // authenticated but couldn't parse username
 }
 
 // PR represents a pull request
