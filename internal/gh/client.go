@@ -656,4 +656,75 @@ func UnresolveThread(threadID string) error {
 	return err
 }
 
+// ReplyToComment adds a reply to a review thread using GraphQL
+func ReplyToComment(repo string, prNumber int, commentID string, body string) error {
+	// Need to get the pull request ID first (GraphQL node ID, not number)
+	prIDQuery := fmt.Sprintf(`
+	query {
+		repository(owner: "%s", name: "%s") {
+			pullRequest(number: %d) {
+				id
+			}
+		}
+	}`, repoOwner(repo), repoName(repo), prNumber)
+	
+	prIDOut, err := run("api", "graphql", "-f", fmt.Sprintf("query=%s", prIDQuery))
+	if err != nil {
+		return fmt.Errorf("failed to get PR ID: %w", err)
+	}
+	
+	// Extract PR ID from JSON response
+	var prIDResp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ID string `json:"id"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(prIDOut), &prIDResp); err != nil {
+		return fmt.Errorf("failed to parse PR ID: %w", err)
+	}
+	prID := prIDResp.Data.Repository.PullRequest.ID
+	
+	// Now add the reply using the comment ID and PR ID
+	mutation := `mutation($pullRequestId: ID!, $pullRequestReviewThreadId: ID!, $body: String!) {
+		addPullRequestReviewThreadReply(input: {
+			pullRequestId: $pullRequestId,
+			pullRequestReviewThreadId: $pullRequestReviewThreadId,
+			body: $body
+		}) {
+			comment {
+				id
+				body
+			}
+		}
+	}`
+	
+	_, err = run("api", "graphql",
+		"-f", fmt.Sprintf("query=%s", mutation),
+		"-F", fmt.Sprintf("pullRequestId=%s", prID),
+		"-F", fmt.Sprintf("pullRequestReviewThreadId=%s", commentID),
+		"-F", fmt.Sprintf("body=%s", body))
+	
+	return err
+}
+
+func repoOwner(repo string) string {
+	parts := strings.Split(repo, "/")
+	if len(parts) == 2 {
+		return parts[0]
+	}
+	return ""
+}
+
+func repoName(repo string) string {
+	parts := strings.Split(repo, "/")
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return repo
+}
+
 // run is defined in runner.go

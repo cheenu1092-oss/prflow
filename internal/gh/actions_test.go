@@ -158,3 +158,75 @@ func TestResolveThreadQueryFormat(t *testing.T) {
 		t.Error("threadID cannot be empty")
 	}
 }
+
+func TestReplyToComment(t *testing.T) {
+	tests := []struct {
+		name      string
+		repo      string
+		prNumber  int
+		commentID string
+		body      string
+		wantError bool
+	}{
+		{
+			name:      "reply to valid comment",
+			repo:      "owner/repo",
+			prNumber:  123,
+			commentID: "test-comment-id",
+			body:      "Thanks for the feedback!",
+			wantError: false,
+		},
+		{
+			name:      "reply with empty body",
+			repo:      "owner/repo",
+			prNumber:  123,
+			commentID: "test-comment-id",
+			body:      "",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Skip("requires gh CLI with test repo access")
+		})
+	}
+}
+
+func TestRepoOwner(t *testing.T) {
+	tests := []struct {
+		repo string
+		want string
+	}{
+		{"owner/repo", "owner"},
+		{"octocat/Hello-World", "octocat"},
+		{"single", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := repoOwner(tt.repo)
+		if got != tt.want {
+			t.Errorf("repoOwner(%q) = %q, want %q", tt.repo, got, tt.want)
+		}
+	}
+}
+
+func TestRepoName(t *testing.T) {
+	tests := []struct {
+		repo string
+		want string
+	}{
+		{"owner/repo", "repo"},
+		{"octocat/Hello-World", "Hello-World"},
+		{"single", "single"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := repoName(tt.repo)
+		if got != tt.want {
+			t.Errorf("repoName(%q) = %q, want %q", tt.repo, got, tt.want)
+		}
+	}
+}

@@ -660,9 +660,45 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.cloneCurrentPRRepo()
 			}
 		case "R":
-			m.loading = true
-			m.err = ""
-			return m, tea.Batch(syncPRs(m.db, m.cfg, m.username), scanWorkspace(m.cfg))
+			// Context-aware: Reply in detail view, Refresh in list view
+			if m.viewMode == viewDetail && len(m.detailThreads) > 0 && m.detailPR != nil {
+				// Enter reply mode for the selected thread
+				unresolvedIdx := 0
+				for _, t := range m.detailThreads {
+					if t.IsResolved {
+						continue
+					}
+					if unresolvedIdx == m.threadCursor {
+						threadID := t.ID
+						if threadID == "" {
+							m.statusMsg = "✗ Thread ID is empty"
+							return m, nil
+						}
+						// TODO: Implement reply input mode (for now, use AI-generated draft reply if available)
+						if m.aiThread != nil && m.aiThread.DraftReply != "" {
+							// Post the AI-generated draft reply
+							pr := m.detailPR
+							return m, func() tea.Msg {
+								err := gh.ReplyToComment(pr.Repo, pr.Number, threadID, m.aiThread.DraftReply)
+								if err != nil {
+									return prActionDoneMsg{action: "reply", err: err}
+								}
+								// Clear AI analysis after posting
+								return prActionDoneMsg{action: "replied with AI draft", err: nil}
+							}
+						} else {
+							m.statusMsg = "⚠️ Generate AI analysis (A) first to get a draft reply, or press 'o' to reply in browser"
+							return m, nil
+						}
+					}
+					unresolvedIdx++
+				}
+			} else {
+				// List view: Refresh
+				m.loading = true
+				m.err = ""
+				return m, tea.Batch(syncPRs(m.db, m.cfg, m.username), scanWorkspace(m.cfg))
+			}
 		case "p":
 			if m.section == sectionWorkspace {
 				return m, m.gitPullCmd()
@@ -1798,6 +1834,7 @@ func (m dashModel) renderDetailHelp() string {
 		}
 		if hasUnresolved {
 			pairs = append(pairs, helpPair("r", "resolve"))
+			pairs = append(pairs, helpPair("R", "reply (AI)"))
 		}
 	}
 	
