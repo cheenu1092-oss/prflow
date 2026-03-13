@@ -341,3 +341,44 @@ func TestSectionAllValues(t *testing.T) {
 		}
 	}
 }
+
+func TestViewReplyMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := dashModel{
+		cfg:           cfg,
+		viewMode:      viewReply,
+		replyText:     "This is my reply",
+		replyThreadID: "thread123",
+		detailPR: &cache.CachedPR{
+			PR: gh.PR{
+				Number: 42,
+			},
+			Repo: "org/repo",
+		},
+		detailThreads: []gh.ReviewThread{
+			{
+				ID: "thread123",
+				Comments: []gh.ThreadComment{
+					{
+						Author: "reviewer",
+						Body:   "Please fix this bug",
+					},
+				},
+			},
+		},
+	}
+
+	result := m.viewReplyMode()
+	if result == "" {
+		t.Error("expected non-empty reply view")
+	}
+
+	// Empty reply
+	m.replyText = ""
+	result = m.viewReplyMode()
+	if result == "" {
+		t.Error("expected non-empty reply view with empty text")
+	}
+}
+
+

@@ -47,6 +47,7 @@ const (
 	viewList viewMode = iota
 	viewDetail
 	viewSearch
+	viewReply
 )
 
 type dashModel struct {
@@ -76,6 +77,10 @@ type dashModel struct {
 	searchResults []string
 	searchCursor  int
 	searching     bool
+
+	// Reply mode
+	replyText     string
+	replyThreadID string
 
 	// AI analysis
 	aiAnalysis    *ai.PRAnalysis
@@ -479,6 +484,11 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		}
 
+		// Reply mode handles its own keys
+		if m.viewMode == viewReply {
+			return m.updateReply(msg)
+		}
+
 		// Clear status message on any keypress
 		m.statusMsg = ""
 
@@ -674,22 +684,15 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.statusMsg = "✗ Thread ID is empty"
 							return m, nil
 						}
-						// TODO: Implement reply input mode (for now, use AI-generated draft reply if available)
+						// Enter reply input mode
+						m.viewMode = viewReply
+						m.replyThreadID = threadID
+						m.replyText = ""
+						// Pre-fill with AI draft if available
 						if m.aiThread != nil && m.aiThread.DraftReply != "" {
-							// Post the AI-generated draft reply
-							pr := m.detailPR
-							return m, func() tea.Msg {
-								err := gh.ReplyToComment(pr.Repo, pr.Number, threadID, m.aiThread.DraftReply)
-								if err != nil {
-									return prActionDoneMsg{action: "reply", err: err}
-								}
-								// Clear AI analysis after posting
-								return prActionDoneMsg{action: "replied with AI draft", err: nil}
-							}
-						} else {
-							m.statusMsg = "⚠️ Generate AI analysis (A) first to get a draft reply, or press 'o' to reply in browser"
-							return m, nil
+							m.replyText = m.aiThread.DraftReply
 						}
+						return m, nil
 					}
 					unresolvedIdx++
 				}
@@ -1029,6 +1032,53 @@ func (m *dashModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateReply handles key input in reply mode
+func (m *dashModel) updateReply(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		// Cancel reply and return to detail view
+		m.viewMode = viewDetail
+		m.replyText = ""
+		m.replyThreadID = ""
+		return m, nil
+	case "enter":
+		// Submit reply if text is not empty
+		if len(strings.TrimSpace(m.replyText)) > 0 && m.detailPR != nil {
+			pr := m.detailPR
+			threadID := m.replyThreadID
+			replyText := m.replyText
+			
+			// Return to detail view and post reply
+			m.viewMode = viewDetail
+			m.replyText = ""
+			m.replyThreadID = ""
+			m.statusMsg = "Posting reply..."
+			
+			return m, func() tea.Msg {
+				err := gh.ReplyToComment(pr.Repo, pr.Number, threadID, replyText)
+				return prActionDoneMsg{action: "replied", err: err}
+			}
+		}
+		return m, nil
+	case "backspace":
+		if len(m.replyText) > 0 {
+			m.replyText = m.replyText[:len(m.replyText)-1]
+		}
+	case "ctrl+u":
+		// Clear entire input
+		m.replyText = ""
+	default:
+		// Add typed character to reply text
+		ch := msg.String()
+		if len(ch) == 1 && ch[0] >= 32 {
+			m.replyText += ch
+		}
+	}
+	return m, nil
+}
+
 func (m *dashModel) checkoutPRCmd() tea.Cmd {
 	var pr *cache.CachedPR
 	switch m.section {
@@ -1203,6 +1253,9 @@ func (m dashModel) View() string {
 	if m.viewMode == viewSearch {
 		return m.viewSearchMode()
 	}
+	if m.viewMode == viewReply {
+		return m.viewReplyMode()
+	}
 	if m.viewMode == viewDetail && m.detailPR != nil {
 		return m.viewDetail()
 	}
@@ -1272,6 +1325,70 @@ func (m dashModel) viewSearchMode() string {
 		helpPair("enter", "search/clone"),
 		helpPair("↑↓", "nav"),
 		helpPair("esc", "back"),
+	}, "  ")))
+
+	return s.String()
+}
+
+func (m dashModel) viewReplyMode() string {
+	width := m.width
+	if width < 60 {
+		width = 80
+	}
+
+	var s strings.Builder
+
+	// Header
+	header := headerStyle.Width(width).Render(" 💬 Reply to Review Comment")
+	s.WriteString(header + "\n\n")
+
+	// Show current thread context if available
+	if m.detailPR != nil && m.replyThreadID != "" {
+		// Find the thread
+		for _, t := range m.detailThreads {
+			if t.ID == m.replyThreadID && len(t.Comments) > 0 {
+				firstComment := t.Comments[0]
+				s.WriteString(detailLabelStyle.Render("Original Comment") + "\n")
+				s.WriteString(fmt.Sprintf("  %s: %s\n\n", threadAuthorStyle.Render("@"+firstComment.Author), threadBodyStyle.Render(firstComment.Body)))
+				break
+			}
+		}
+	}
+
+	// Reply input box
+	s.WriteString(detailLabelStyle.Render("Your Reply") + "\n")
+	cursor := "█"
+	replyLines := strings.Split(m.replyText, "\n")
+	if len(replyLines) == 0 || m.replyText == "" {
+		s.WriteString(fmt.Sprintf("  %s%s\n", m.replyText, cursor))
+	} else {
+		for i, line := range replyLines {
+			if i == len(replyLines)-1 {
+				s.WriteString(fmt.Sprintf("  %s%s\n", line, cursor))
+			} else {
+				s.WriteString(fmt.Sprintf("  %s\n", line))
+			}
+		}
+	}
+
+	s.WriteString("\n")
+	
+	// Character count
+	charCount := len(m.replyText)
+	countStyle := wsMetaStyle
+	if charCount > 500 {
+		countStyle = wsDirtyStyle
+	}
+	if charCount > 1000 {
+		countStyle = wsBehindStyle
+	}
+	s.WriteString(fmt.Sprintf("  %s\n\n", countStyle.Render(fmt.Sprintf("%d characters", charCount))))
+
+	// Help text
+	s.WriteString(helpStyle.Render("  " + strings.Join([]string{
+		helpPair("enter", "post"),
+		helpPair("ctrl+u", "clear"),
+		helpPair("esc", "cancel"),
 	}, "  ")))
 
 	return s.String()
@@ -1834,7 +1951,7 @@ func (m dashModel) renderDetailHelp() string {
 		}
 		if hasUnresolved {
 			pairs = append(pairs, helpPair("r", "resolve"))
-			pairs = append(pairs, helpPair("R", "reply (AI)"))
+			pairs = append(pairs, helpPair("R", "reply"))
 		}
 	}
 	
