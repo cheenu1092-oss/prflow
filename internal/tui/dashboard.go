@@ -181,7 +181,12 @@ func dashTickCmd() tea.Cmd {
 }
 
 func (m dashModel) Init() tea.Cmd {
-	return tea.Batch(syncPRs(m.db, m.cfg, m.username), scanWorkspace(m.cfg), dashTickCmd())
+	return tea.Batch(
+		syncPRs(m.db, m.cfg, m.username),
+		scanWorkspace(m.cfg),
+		dashTickCmd(),
+		startAutoRefreshTimer(m.cfg.Settings.RefreshInterval),
+	)
 }
 
 func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
@@ -609,6 +614,19 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.fetchAllCmd()
 			}
 		}
+
+	case autoRefreshMsg:
+		// Background auto-refresh - only if not already loading
+		if !m.loading && m.viewMode == viewList {
+			m.loading = true
+			return m, tea.Batch(
+				syncPRs(m.db, m.cfg, m.username),
+				scanWorkspace(m.cfg),
+				startAutoRefreshTimer(m.cfg.Settings.RefreshInterval),
+			)
+		}
+		// If already loading or in detail view, just restart timer
+		return m, startAutoRefreshTimer(m.cfg.Settings.RefreshInterval)
 
 	case syncDoneMsg:
 		m.loading = false
