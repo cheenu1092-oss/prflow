@@ -22,7 +22,7 @@ const (
 	sectionWaiting
 	sectionReview
 	sectionWorkspace
-	sectionDone
+	sectionNeedsAttention
 )
 
 func (s section) String() string {
@@ -35,8 +35,8 @@ func (s section) String() string {
 		return "👀 Review"
 	case sectionWorkspace:
 		return "📂 Workspace"
-	case sectionDone:
-		return "✅ Done"
+	case sectionNeedsAttention:
+		return "🔔 Needs Attention Again"
 	}
 	return ""
 }
@@ -60,11 +60,11 @@ type dashModel struct {
 	viewMode  viewMode
 
 	// Data
-	doNow     []cache.CachedPR
-	waiting   []cache.CachedPR
-	review    []cache.CachedPR
-	done      []cache.CachedPR
-	workspace []RepoStatus
+	doNow           []cache.CachedPR
+	waiting         []cache.CachedPR
+	review          []cache.CachedPR
+	needsAttention  []cache.CachedPR
+	workspace       []RepoStatus
 
 	// Detail view
 	detailPR      *cache.CachedPR
@@ -95,11 +95,11 @@ type dashModel struct {
 }
 
 type syncDoneMsg struct {
-	doNow   []cache.CachedPR
-	waiting []cache.CachedPR
-	review  []cache.CachedPR
-	done    []cache.CachedPR
-	err     error
+	doNow          []cache.CachedPR
+	waiting        []cache.CachedPR
+	review         []cache.CachedPR
+	needsAttention []cache.CachedPR
+	err            error
 }
 
 type workspaceScanMsg struct {
@@ -191,7 +191,7 @@ func (m dashModel) Init() tea.Cmd {
 
 func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
 	return func() tea.Msg {
-		var doNow, waiting, review, done []cache.CachedPR
+		var doNow, waiting, review []cache.CachedPR
 		seenPRs := make(map[string]bool)
 
 		// Re-verify username if it's the default fallback
@@ -298,31 +298,94 @@ func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
 			db.UpsertPR(pr, cached.Repo, "review")
 		}
 
-		// Step 4: Get recently merged PRs for Done section
-		mergedPRs, _ := gh.SearchMergedPRs()
-		for _, pr := range mergedPRs {
-			pr := pr
-			cached := cache.CachedPR{
-				PR:      pr,
-				Repo:    pr.Repository.NameWithOwner,
-				Section: "done",
+		// Step 4: Get PRs needing re-attention (reviewed by me, but updated after my review)
+		var needsAttention []cache.CachedPR
+		reviewedPRs, _ := gh.SearchReviewedPRs()
+		for i := range reviewedPRs {
+			pr := &reviewedPRs[i]
+			key := fmt.Sprintf("%s#%d", pr.Repository.NameWithOwner, pr.Number)
+			
+			// Skip if already in another section (e.g., my own PRs or review requests)
+			if seenPRs[key] {
+				continue
 			}
-			done = append(done, cached)
+			
+			// Get full PR details to check if it needs attention
+			detail, err := gh.GetPRDetail(pr.Repository.NameWithOwner, pr.Number)
+			if err != nil {
+				continue
+			}
+			
+			// Check if there's been activity after my last review
+			if needsReReview(detail, username) {
+				seenPRs[key] = true
+				cached := cache.CachedPR{
+					PR:      *detail,
+					Repo:    pr.Repository.NameWithOwner,
+					Section: "needs_attention",
+				}
+				needsAttention = append(needsAttention, cached)
+				db.UpsertPR(detail, cached.Repo, "needs_attention")
+			}
 		}
 
 		// Step 5: Sort each section by urgency (not just updated_at)
 		SortByUrgency(doNow)
 		SortByUrgency(waiting)
 		SortByUrgency(review)
-		// done section stays chronological (most recently merged first)
+		SortByUrgency(needsAttention)
 
 		return syncDoneMsg{
-			doNow:   doNow,
-			waiting: waiting,
-			review:  review,
-			done:    done,
+			doNow:          doNow,
+			waiting:        waiting,
+			review:         review,
+			needsAttention: needsAttention,
 		}
 	}
+}
+
+// needsReReview checks if a PR needs re-attention from the reviewer
+// Returns true if the PR was updated after the user's last review
+func needsReReview(pr *gh.PR, username string) bool {
+	if pr == nil || username == "" {
+		return false
+	}
+	
+	// Skip if this is my own PR
+	if strings.EqualFold(pr.Author.Login, username) {
+		return false
+	}
+	
+	// Find my last review timestamp
+	var myLastReview time.Time
+	for _, rev := range pr.Reviews.Nodes {
+		if !strings.EqualFold(rev.Author.Login, username) {
+			continue
+		}
+		
+		reviewTime, err := time.Parse(time.RFC3339, rev.SubmittedAt)
+		if err != nil {
+			continue
+		}
+		
+		if reviewTime.After(myLastReview) {
+			myLastReview = reviewTime
+		}
+	}
+	
+	// If I never reviewed, no need for re-attention
+	if myLastReview.IsZero() {
+		return false
+	}
+	
+	// Check if PR was updated after my last review
+	prUpdated, err := time.Parse(time.RFC3339, pr.UpdatedAt)
+	if err != nil {
+		return false
+	}
+	
+	// If PR updated after my review (with 1-minute buffer to avoid false positives)
+	return prUpdated.After(myLastReview.Add(1 * time.Minute))
 }
 
 func scanWorkspace(cfg *config.Config) tea.Cmd {
@@ -636,7 +699,7 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.doNow = msg.doNow
 			m.waiting = msg.waiting
 			m.review = msg.review
-			m.done = msg.done
+			m.needsAttention = msg.needsAttention
 			m.lastSync = time.Now()
 			m.err = ""
 		}
@@ -732,8 +795,8 @@ func (m dashModel) currentListLen() int {
 		return len(m.review)
 	case sectionWorkspace:
 		return len(m.workspace)
-	case sectionDone:
-		return len(m.done)
+	case sectionNeedsAttention:
+		return len(m.needsAttention)
 	}
 	return 0
 }
@@ -753,9 +816,9 @@ func (m *dashModel) openDetail() (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.review) {
 			pr = &m.review[m.cursor]
 		}
-	case sectionDone:
-		if m.cursor < len(m.done) {
-			pr = &m.done[m.cursor]
+	case sectionNeedsAttention:
+		if m.cursor < len(m.needsAttention) {
+			pr = &m.needsAttention[m.cursor]
 		}
 	case sectionWorkspace:
 		// Workspace items show path info and open in browser
@@ -828,9 +891,9 @@ func (m *dashModel) openInBrowser() {
 		if m.cursor < len(m.review) {
 			gh.OpenInBrowser(m.review[m.cursor].URL)
 		}
-	case sectionDone:
-		if m.cursor < len(m.done) {
-			gh.OpenInBrowser(m.done[m.cursor].URL)
+	case sectionNeedsAttention:
+		if m.cursor < len(m.needsAttention) {
+			gh.OpenInBrowser(m.needsAttention[m.cursor].URL)
 		}
 	case sectionWorkspace:
 		if m.cursor < len(m.workspace) {
@@ -945,9 +1008,9 @@ func (m *dashModel) checkoutPRCmd() tea.Cmd {
 		if m.cursor < len(m.review) {
 			pr = &m.review[m.cursor]
 		}
-	case sectionDone:
-		if m.cursor < len(m.done) {
-			pr = &m.done[m.cursor]
+	case sectionNeedsAttention:
+		if m.cursor < len(m.needsAttention) {
+			pr = &m.needsAttention[m.cursor]
 		}
 	}
 	if pr == nil {
@@ -1015,9 +1078,9 @@ func (m *dashModel) cloneCurrentPRRepo() tea.Cmd {
 		if m.cursor < len(m.review) {
 			repo = m.review[m.cursor].Repo
 		}
-	case sectionDone:
-		if m.cursor < len(m.done) {
-			repo = m.done[m.cursor].Repo
+	case sectionNeedsAttention:
+		if m.cursor < len(m.needsAttention) {
+			repo = m.needsAttention[m.cursor].Repo
 		}
 	}
 	if repo == "" {
@@ -1230,7 +1293,7 @@ func (m dashModel) renderSidebar() string {
 		{"⏳", "Waiting", len(m.waiting), sectionWaiting},
 		{"👀", "Review", len(m.review), sectionReview},
 		{"📂", "Workspace", len(m.workspace), sectionWorkspace},
-		{"✅", "Done", len(m.done), sectionDone},
+		{"🔔", "Needs Attention", len(m.needsAttention), sectionNeedsAttention},
 	}
 
 	for _, e := range entries {
@@ -1283,8 +1346,8 @@ func (m dashModel) renderMainPanel(width int) string {
 		s.WriteString(m.renderPRCards(m.review, width))
 	case sectionWorkspace:
 		s.WriteString(m.renderWorkspaceCards(width))
-	case sectionDone:
-		s.WriteString(m.renderPRCards(m.done, width))
+	case sectionNeedsAttention:
+		s.WriteString(m.renderPRCards(m.needsAttention, width))
 	}
 
 	return mainPanelStyle.Width(width).Render(s.String())

@@ -267,19 +267,19 @@ func TestSearchOrgReposSuccess(t *testing.T) {
 	}
 }
 
-func TestSearchMergedPRsSuccess(t *testing.T) {
+func TestSearchReviewedPRsSuccess(t *testing.T) {
 	mock := NewMockRunner()
 	mock.When("search prs", `[
-		{"number": 100, "title": "Shipped feature", "state": "closed", "url": "https://github.com/org/repo/pull/100", "repository": {"nameWithOwner": "org/repo"}}
+		{"number": 100, "title": "Reviewed PR", "state": "open", "url": "https://github.com/org/repo/pull/100", "repository": {"nameWithOwner": "org/repo"}, "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-02T00:00:00Z"}
 	]`, nil)
 
 	old := defaultRunner
 	SetRunner(mock)
 	defer SetRunner(old)
 
-	prs, err := SearchMergedPRs()
+	prs, err := SearchReviewedPRs()
 	if err != nil {
-		t.Fatalf("SearchMergedPRs failed: %v", err)
+		t.Fatalf("SearchReviewedPRs failed: %v", err)
 	}
 	if len(prs) != 1 {
 		t.Fatalf("expected 1 PR, got %d", len(prs))

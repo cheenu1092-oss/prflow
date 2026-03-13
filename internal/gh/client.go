@@ -536,12 +536,13 @@ func CheckoutPR(repo string, number int) error {
 	return err
 }
 
-// SearchMergedPRs returns recently merged PRs by the current user
-func SearchMergedPRs() ([]PR, error) {
+// SearchReviewedPRs returns open PRs where the current user has submitted a review
+// (but is not the author)
+func SearchReviewedPRs() ([]PR, error) {
 	out, err := run("search", "prs",
-		"--author=@me",
-		"--merged",
-		"--limit", "20",
+		"--reviewed-by=@me",
+		"--state=open",
+		"--limit", "50",
 		"--sort", "updated",
 		"--json", "number,title,state,url,repository,createdAt,updatedAt",
 	)

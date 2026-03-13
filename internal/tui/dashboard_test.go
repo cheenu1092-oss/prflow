@@ -188,7 +188,7 @@ func TestSectionString(t *testing.T) {
 		{sectionWaiting, "⏳ Waiting"},
 		{sectionReview, "👀 Review"},
 		{sectionWorkspace, "📂 Workspace"},
-		{sectionDone, "✅ Done"},
+		{sectionNeedsAttention, "🔔 Needs Attention Again"},
 	}
 
 	for _, tt := range tests {
@@ -201,11 +201,11 @@ func TestSectionString(t *testing.T) {
 
 func TestCurrentListLen(t *testing.T) {
 	m := dashModel{
-		doNow:     make([]cache.CachedPR, 3),
-		waiting:   make([]cache.CachedPR, 5),
-		review:    make([]cache.CachedPR, 2),
-		workspace: make([]RepoStatus, 4),
-		done:      make([]cache.CachedPR, 1),
+		doNow:          make([]cache.CachedPR, 3),
+		waiting:        make([]cache.CachedPR, 5),
+		review:         make([]cache.CachedPR, 2),
+		workspace:      make([]RepoStatus, 4),
+		needsAttention: make([]cache.CachedPR, 1),
 	}
 
 	tests := []struct {
@@ -216,7 +216,7 @@ func TestCurrentListLen(t *testing.T) {
 		{sectionWaiting, 5},
 		{sectionReview, 2},
 		{sectionWorkspace, 4},
-		{sectionDone, 1},
+		{sectionNeedsAttention, 1},
 	}
 
 	for _, tt := range tests {
@@ -335,7 +335,7 @@ func TestViewSearchMode(t *testing.T) {
 
 func TestSectionAllValues(t *testing.T) {
 	// Verify all 5 sections have non-empty string representation
-	for i := section(0); i <= sectionDone; i++ {
+	for i := section(0); i <= sectionNeedsAttention; i++ {
 		if i.String() == "" {
 			t.Errorf("section %d has empty string", i)
 		}

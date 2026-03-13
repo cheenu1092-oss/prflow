@@ -197,7 +197,7 @@ func TestRenderMainPanel(t *testing.T) {
 
 	// Each section
 	m.loading = false
-	for _, sec := range []section{sectionDoNow, sectionWaiting, sectionReview, sectionWorkspace, sectionDone} {
+	for _, sec := range []section{sectionDoNow, sectionWaiting, sectionReview, sectionWorkspace, sectionNeedsAttention} {
 		m.section = sec
 		result = m.renderMainPanel(80)
 		if result == "" {
