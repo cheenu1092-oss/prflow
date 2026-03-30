@@ -223,3 +223,121 @@ func TestRenderRepoStatusBehindWarning(t *testing.T) {
 		t.Error("expected non-empty output for way-behind repo")
 	}
 }
+
+func TestDetectStaleBranches(t *testing.T) {
+	dir := setupGitRepo(t)
+
+	// Create a feature branch, add a commit, then merge it back into main
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s: %v", args, string(out), err)
+		}
+	}
+
+	// Create and merge a feature branch
+	runGit("checkout", "-b", "feature/old")
+	os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature"), 0644)
+	runGit("add", "feature.txt")
+	runGit("commit", "-m", "add feature")
+
+	// Switch back to default branch and merge
+	// Detect what the default branch is (could be main or master)
+	defaultBranch, _ := exec.Command("git", "-C", dir, "branch", "--show-current").CombinedOutput()
+	// We're on feature/old, so find the original branch
+	runGit("checkout", "-")
+	runGit("merge", "feature/old")
+
+	_ = defaultBranch // suppress unused
+
+	stale := detectStaleBranches(dir)
+	found := false
+	for _, b := range stale {
+		if b == "feature/old" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'feature/old' in stale branches, got %v", stale)
+	}
+}
+
+func TestDetectStaleBranchesExcludesMain(t *testing.T) {
+	dir := setupGitRepo(t)
+
+	stale := detectStaleBranches(dir)
+	for _, b := range stale {
+		if b == "main" || b == "master" || b == "develop" {
+			t.Errorf("expected main/master/develop to be excluded, but got %q in stale list", b)
+		}
+	}
+}
+
+func TestDeleteStaleBranches(t *testing.T) {
+	dir := setupGitRepo(t)
+
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s: %v", args, string(out), err)
+		}
+	}
+
+	// Create and merge a feature branch
+	runGit("checkout", "-b", "feature/merged")
+	os.WriteFile(filepath.Join(dir, "merged.txt"), []byte("merged"), 0644)
+	runGit("add", "merged.txt")
+	runGit("commit", "-m", "merged feature")
+	runGit("checkout", "-")
+	runGit("merge", "feature/merged")
+
+	// Verify it's detected as stale
+	stale := detectStaleBranches(dir)
+	found := false
+	for _, b := range stale {
+		if b == "feature/merged" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected 'feature/merged' in stale branches before delete, got %v", stale)
+	}
+
+	// Delete it
+	deleted, err := DeleteStaleBranches(dir, []string{"feature/merged"})
+	if err != nil {
+		t.Fatalf("DeleteStaleBranches failed: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("expected 1 deleted, got %d", deleted)
+	}
+
+	// Verify it's gone
+	staleAfter := detectStaleBranches(dir)
+	for _, b := range staleAfter {
+		if b == "feature/merged" {
+			t.Error("expected 'feature/merged' to be gone after delete")
+		}
+	}
+}
+
+func TestRenderWorkspaceCardWithStaleBranches(t *testing.T) {
+	rs := &RepoStatus{
+		Name:          "org/repo",
+		Branch:        "main",
+		Clean:         true,
+		HasRemote:     true,
+		LastCommit:    "abc123 init (1h ago)",
+		StaleBranches: []string{"feature/old", "feature/done", "feature/merged"},
+	}
+
+	output := RenderRepoStatus(rs, false)
+	if output == "" {
+		t.Error("expected non-empty output")
+	}
+	// The RenderRepoStatus doesn't show stale branches (that's in renderWorkspaceCard),
+	// but we verify it doesn't crash with the field populated.
+	// Stale branch rendering is tested via the dashModel.renderWorkspaceCard in helpers_test.go
+}

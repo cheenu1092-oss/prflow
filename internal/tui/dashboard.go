@@ -87,6 +87,9 @@ type dashModel struct {
 	aiLoading   bool
 	aiAvailable bool
 
+	// Stale branch delete state
+	deleteStalePending bool // true when waiting for 'd' confirmation
+
 	// State
 	loading    bool
 	lastSync   time.Time
@@ -220,6 +223,10 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clear status message on any keypress
 		m.statusMsg = ""
+		// Reset delete-stale confirmation unless the key is 'd'
+		if msg.String() != "d" {
+			m.deleteStalePending = false
+		}
 
 		switch msg.String() {
 		case "ctrl+c":
@@ -463,6 +470,34 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.section == sectionWorkspace {
 				m.statusMsg = "Fetching all repos..."
 				return m, m.fetchAllCmd()
+			}
+		case "d":
+			if m.section == sectionWorkspace && m.viewMode == viewList {
+				if m.cursor < len(m.workspace) {
+					ws := &m.workspace[m.cursor]
+					if len(ws.StaleBranches) == 0 {
+						m.statusMsg = "No stale branches to delete"
+						return m, nil
+					}
+					if m.deleteStalePending {
+						// Second press: perform deletion
+						m.deleteStalePending = false
+						path := ws.Path
+						branches := ws.StaleBranches
+						return m, func() tea.Msg {
+							deleted, err := DeleteStaleBranches(path, branches)
+							if err != nil {
+								return gitOpDoneMsg{msg: fmt.Sprintf("Deleted %d stale branches (some failed)", deleted), err: nil}
+							}
+							return gitOpDoneMsg{msg: fmt.Sprintf("Deleted %d stale branches", deleted)}
+						}
+					} else {
+						// First press: show confirmation
+						m.deleteStalePending = true
+						m.statusMsg = fmt.Sprintf("Delete %d stale branches? Press 'd' again", len(ws.StaleBranches))
+						return m, nil
+					}
+				}
 			}
 		}
 

@@ -493,13 +493,19 @@ func (m dashModel) renderWorkspaceCard(ws *RepoStatus, selected bool, width int)
 		unpushedStr = "\n" + wsDirtyStyle.Render(fmt.Sprintf("⬆ %d unpushed", ws.Unpushed))
 	}
 
+	// Stale branches
+	staleStr := ""
+	if len(ws.StaleBranches) > 0 {
+		staleStr = "\n" + wsDirtyStyle.Render(fmt.Sprintf("⚠ %d stale branches (merged)", len(ws.StaleBranches)))
+	}
+
 	// Last commit
 	commitStr := ""
 	if ws.LastCommit != "" {
 		commitStr = "\n" + wsMetaStyle.Render(ws.LastCommit)
 	}
 
-	content := nameStr + "  " + branchStr + "\n" + baStr + "  " + treeStr + unpushedStr + commitStr
+	content := nameStr + "  " + branchStr + "\n" + baStr + "  " + treeStr + unpushedStr + staleStr + commitStr
 
 	if selected {
 		return wsCardSelectedStyle.Width(width).Render(content)

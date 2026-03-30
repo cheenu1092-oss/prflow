@@ -9,19 +9,20 @@ import (
 
 // RepoStatus holds local git state for a workspace repo
 type RepoStatus struct {
-	Name       string // org/repo
-	Path       string // local path
-	Branch     string
-	Behind     int
-	Ahead      int
-	Modified   int
-	Staged     int
-	Untracked  int
-	Unpushed   int
-	LastCommit string // short hash + message + relative time
-	Clean      bool
-	HasRemote  bool
-	LinkedPR   string // e.g., "#412 (changes requested)"
+	Name          string // org/repo
+	Path          string // local path
+	Branch        string
+	Behind        int
+	Ahead         int
+	Modified      int
+	Staged        int
+	Untracked     int
+	Unpushed      int
+	LastCommit    string // short hash + message + relative time
+	Clean         bool
+	HasRemote     bool
+	LinkedPR      string // e.g., "#412 (changes requested)"
+	StaleBranches []string
 }
 
 // ScanWorkspaceRepo gets git status for a local repo
@@ -98,6 +99,9 @@ func ScanWorkspaceRepo(path string) (*RepoStatus, error) {
 	}
 
 	rs.Clean = rs.Modified == 0 && rs.Staged == 0 && rs.Untracked == 0
+
+	// Detect stale (merged) branches
+	rs.StaleBranches = detectStaleBranches(path)
 
 	return rs, nil
 }
@@ -205,6 +209,62 @@ func parseRepoName(remote string) string {
 		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
 	}
 	return remote
+}
+
+// detectStaleBranches finds local branches that have been merged into the default branch.
+// It excludes main, master, develop, and the current branch.
+func detectStaleBranches(path string) []string {
+	currentBranch, _ := gitCmd(path, "branch", "--show-current")
+	defaultBranch := detectDefaultBranch(path)
+
+	merged, err := gitCmd(path, "branch", "--merged")
+	if err != nil || merged == "" {
+		return nil
+	}
+
+	excluded := map[string]bool{
+		"main":    true,
+		"master":  true,
+		"develop": true,
+	}
+	if currentBranch != "" {
+		excluded[currentBranch] = true
+	}
+	if defaultBranch != "" {
+		excluded[defaultBranch] = true
+	}
+
+	var stale []string
+	for _, line := range strings.Split(merged, "\n") {
+		branch := strings.TrimSpace(line)
+		// Skip marker for current branch ("* branch-name")
+		branch = strings.TrimPrefix(branch, "* ")
+		branch = strings.TrimSpace(branch)
+		if branch == "" {
+			continue
+		}
+		if excluded[branch] {
+			continue
+		}
+		stale = append(stale, branch)
+	}
+	return stale
+}
+
+// DeleteStaleBranches safely deletes the given branches using git branch -d (safe delete).
+// Returns the count of successfully deleted branches.
+func DeleteStaleBranches(path string, branches []string) (int, error) {
+	deleted := 0
+	var lastErr error
+	for _, branch := range branches {
+		_, err := gitCmd(path, "branch", "-d", branch)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		deleted++
+	}
+	return deleted, lastErr
 }
 
 func gitCmd(dir string, args ...string) (string, error) {
