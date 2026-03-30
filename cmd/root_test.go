@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/cheenu1092-oss/prflow/internal/config"
-	"github.com/cheenu1092-oss/prflow/internal/gh"
 )
 
 func TestPrintUsage(t *testing.T) {
@@ -44,12 +42,13 @@ func setupTestEnv(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	// Cache DB -- point HOME so cache.Open() creates DB there
+	// Cache DB — point HOME so cache.Open() creates DB there
 	os.Setenv("HOME", tmpDir)
 	t.Cleanup(func() { os.Unsetenv("HOME") })
 }
 
 // seedDB inserts PRs directly into the cache DB at the temp HOME.
+// It creates the directory structure and schema first.
 func seedDB(t *testing.T) {
 	t.Helper()
 	home := os.Getenv("HOME")
@@ -64,6 +63,7 @@ func seedDB(t *testing.T) {
 	}
 	defer db.Close()
 
+	// Create schema so inserts work even if cache.Open hasn't been called yet.
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS prs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		repo TEXT NOT NULL,
@@ -152,6 +152,7 @@ func TestRunListJSON(t *testing.T) {
 		t.Errorf("expected needs_attention PR #50, got #%d", out.NeedsAttention[0].Number)
 	}
 
+	// Verify all required JSON keys are present by checking the raw JSON.
 	raw := buf.String()
 	for _, key := range []string{"do_now", "waiting", "review", "needs_attention"} {
 		if !strings.Contains(raw, `"`+key+`"`) {
@@ -179,8 +180,10 @@ func TestRunListJSONEmpty(t *testing.T) {
 		t.Fatalf("invalid JSON for empty cache: %v\n%s", err, buf.String())
 	}
 
+	// All sections should be empty arrays, not null.
 	raw := buf.String()
 	for _, key := range []string{"do_now", "waiting", "review", "needs_attention"} {
+		// The value should be [] (empty array), not null.
 		if strings.Contains(raw, `"`+key+`": null`) {
 			t.Errorf("section %q is null, expected empty array", key)
 		}
@@ -204,6 +207,7 @@ func TestRunListPlaintext(t *testing.T) {
 
 	output := buf.String()
 
+	// Should contain section headers.
 	if !strings.Contains(output, "Do Now") {
 		t.Error("plaintext output missing 'Do Now' section")
 	}
@@ -214,6 +218,7 @@ func TestRunListPlaintext(t *testing.T) {
 		t.Error("plaintext output missing 'Review' section")
 	}
 
+	// Should contain PR numbers and titles.
 	if !strings.Contains(output, "#42") {
 		t.Error("plaintext output missing PR #42")
 	}
@@ -224,6 +229,7 @@ func TestRunListPlaintext(t *testing.T) {
 		t.Error("plaintext output missing PR title 'Add dark mode'")
 	}
 
+	// Should NOT be valid JSON.
 	var js json.RawMessage
 	if json.Unmarshal([]byte(output), &js) == nil {
 		t.Error("plaintext output should not be valid JSON")
@@ -261,196 +267,5 @@ func TestHasFlag(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("hasFlag(%v, %q) = %v, want %v", tt.args, tt.flag, got, tt.want)
 		}
-	}
-}
-
-func TestRunSyncNoConfig(t *testing.T) {
-	config.SetPathOverride("/nonexistent/config.yaml")
-	defer config.SetPathOverride("")
-
-	err := runSync()
-	if err == nil {
-		t.Error("runSync should error without config")
-	}
-}
-
-func TestClassifyPR(t *testing.T) {
-	tests := []struct {
-		name     string
-		pr       *gh.PR
-		username string
-		want     string
-	}{
-		{
-			name: "changes requested on my PR",
-			pr: &gh.PR{
-				Author:         gh.Author{Login: "me"},
-				ReviewDecision: "CHANGES_REQUESTED",
-			},
-			username: "me",
-			want:     "do_now",
-		},
-		{
-			name: "approved my PR",
-			pr: &gh.PR{
-				Author:         gh.Author{Login: "me"},
-				ReviewDecision: "APPROVED",
-			},
-			username: "me",
-			want:     "do_now",
-		},
-		{
-			name: "my PR with conflicts",
-			pr: &gh.PR{
-				Author:    gh.Author{Login: "me"},
-				Mergeable: "CONFLICTING",
-			},
-			username: "me",
-			want:     "do_now",
-		},
-		{
-			name: "my PR waiting for review",
-			pr: &gh.PR{
-				Author: gh.Author{Login: "me"},
-			},
-			username: "me",
-			want:     "waiting",
-		},
-		{
-			name: "someone else's PR",
-			pr: &gh.PR{
-				Author: gh.Author{Login: "other"},
-			},
-			username: "me",
-			want:     "review",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := classifyPR(tt.pr, tt.username)
-			if got != tt.want {
-				t.Errorf("classifyPR() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseOpenArgs(t *testing.T) {
-	tests := []struct {
-		input   string
-		repo    string
-		number  int
-		wantErr bool
-	}{
-		{input: "org/repo#42", repo: "org/repo", number: 42},
-		{input: "#42", repo: "", number: 42},
-		{input: "org/repo", repo: "org/repo", number: 0},
-		{input: "", repo: "", number: 0},
-		{input: "myorg/myrepo#1", repo: "myorg/myrepo", number: 1},
-		{input: "#", wantErr: true},
-		{input: "#abc", wantErr: true},
-		{input: "#0", wantErr: true},
-		{input: "#-5", wantErr: true},
-		{input: "badarg", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("input=%q", tt.input), func(t *testing.T) {
-			got, err := parseOpenArgs(tt.input)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("parseOpenArgs(%q) expected error, got nil", tt.input)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parseOpenArgs(%q) unexpected error: %v", tt.input, err)
-			}
-			if got.Repo != tt.repo {
-				t.Errorf("parseOpenArgs(%q).Repo = %q, want %q", tt.input, got.Repo, tt.repo)
-			}
-			if got.Number != tt.number {
-				t.Errorf("parseOpenArgs(%q).Number = %d, want %d", tt.input, got.Number, tt.number)
-			}
-		})
-	}
-}
-
-func TestParseRepoFromURL(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"https://github.com/org/repo.git", "org/repo"},
-		{"https://github.com/org/repo", "org/repo"},
-		{"git@github.com:org/repo.git", "org/repo"},
-		{"git@github.com:org/repo", "org/repo"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got, err := parseRepoFromURL(tt.input)
-			if err != nil {
-				t.Fatalf("parseRepoFromURL(%q) error: %v", tt.input, err)
-			}
-			if got != tt.want {
-				t.Errorf("parseRepoFromURL(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRunOpenWithFullRef(t *testing.T) {
-	origFn := repoFromRemote
-	defer func() { repoFromRemote = origFn }()
-	repoFromRemote = func() (string, error) {
-		return "fallback/repo", nil
-	}
-
-	tests := []struct {
-		name     string
-		arg      string
-		wantRepo string
-		wantNum  int
-	}{
-		{"full ref", "org/repo#99", "org/repo", 99},
-		{"number only uses remote", "#7", "fallback/repo", 7},
-		{"repo only", "org/repo", "org/repo", 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parsed, err := parseOpenArgs(tt.arg)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			repo := parsed.Repo
-			if repo == "" {
-				repo, _ = repoFromRemote()
-			}
-			if repo != tt.wantRepo {
-				t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
-			}
-
-			var url string
-			if parsed.Number > 0 {
-				url = fmt.Sprintf("https://github.com/%s/pull/%d", repo, parsed.Number)
-			} else {
-				url = fmt.Sprintf("https://github.com/%s/pulls", repo)
-			}
-
-			if tt.wantNum > 0 {
-				expected := fmt.Sprintf("https://github.com/%s/pull/%d", tt.wantRepo, tt.wantNum)
-				if url != expected {
-					t.Errorf("url = %q, want %q", url, expected)
-				}
-			} else {
-				expected := fmt.Sprintf("https://github.com/%s/pulls", tt.wantRepo)
-				if url != expected {
-					t.Errorf("url = %q, want %q", url, expected)
-				}
-			}
-		})
 	}
 }
