@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -248,6 +249,17 @@ func TestRenderWorkspaceCard(t *testing.T) {
 	result = m.renderWorkspaceCard(ws, false, 80)
 	if result == "" {
 		t.Error("expected non-empty behind workspace card")
+	}
+
+	// With stale branches
+	ws.Behind = 0
+	ws.StaleBranches = []string{"feature/old", "feature/done", "feature/merged"}
+	result = m.renderWorkspaceCard(ws, false, 80)
+	if result == "" {
+		t.Error("expected non-empty workspace card with stale branches")
+	}
+	if !strings.Contains(result, "3 stale branches") {
+		t.Errorf("expected stale branch indicator in output, got: %s", result)
 	}
 }
 
