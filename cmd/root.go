@@ -76,6 +76,7 @@ func runSync() error {
 	if err != nil {
 		return fmt.Errorf("no config found, run 'prflow setup' first")
 	}
+	cfg.Validate()
 
 	db, err := cache.Open()
 	if err != nil {
@@ -276,11 +277,10 @@ func toJSONPRs(prs []cache.CachedPR) []jsonPR {
 // runListTo writes the PR list to w. When jsonMode is true it outputs JSON;
 // otherwise it writes human-readable plaintext.
 func runListTo(w io.Writer, jsonMode bool) error {
-	cfg, err := config.Load()
+	_, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("no config found, run 'prflow setup' first")
 	}
-	_ = cfg
 
 	db, err := cache.Open()
 	if err != nil {

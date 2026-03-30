@@ -226,14 +226,17 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateReply(msg)
 		}
 
-		// Clear status message on any keypress
-		m.statusMsg = ""
+		// Clear status message on any keypress (except confirmation keys)
+		key := msg.String()
+		if key != "m" && key != "d" && key != "n" {
+			m.statusMsg = ""
+		}
 		// Reset delete-stale confirmation unless the key is 'd'
-		if msg.String() != "d" {
+		if key != "d" {
 			m.deleteStalePending = false
 		}
 		// Reset nudge confirmation unless the key is 'n'
-		if msg.String() != "n" {
+		if key != "n" {
 			m.nudgePending = false
 			m.nudgeReviewer = ""
 			m.nudgeWaitDays = 0
