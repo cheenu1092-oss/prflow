@@ -20,11 +20,14 @@ import (
 	"github.com/cheenu1092-oss/prflow/internal/watch"
 )
 
+// Version info set via ldflags at build time.
+var Version, Commit, Date string
+
 func Execute() error {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version":
-			fmt.Println("prflow v0.1.0")
+			fmt.Println(VersionString())
 			return nil
 		case "setup":
 			return tui.RunOnboarding()
@@ -260,6 +263,29 @@ func runWatch() error {
 
 	w := watch.New(cfg, db, username, interval)
 	return w.Run(ctx)
+}
+
+// VersionString returns a formatted version string.
+func VersionString() string {
+	v := Version
+	if v == "" {
+		v = "0.1.0"
+	}
+	s := fmt.Sprintf("prflow v%s", v)
+	if Commit != "" || Date != "" {
+		parts := ""
+		if Commit != "" {
+			parts += "commit " + Commit
+		}
+		if Date != "" {
+			if parts != "" {
+				parts += ", "
+			}
+			parts += "built " + Date
+		}
+		s += fmt.Sprintf(" (%s)", parts)
+	}
+	return s
 }
 
 func printUsage() {
