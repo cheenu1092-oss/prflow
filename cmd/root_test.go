@@ -67,3 +67,41 @@ func TestClassifyPR(t *testing.T) {
 		})
 	}
 }
+
+func TestVersionStringDefault(t *testing.T) {
+	oldV, oldC, oldD := Version, Commit, Date
+	defer func() { Version, Commit, Date = oldV, oldC, oldD }()
+	Version, Commit, Date = "", "", ""
+	got := VersionString()
+	if got != "prflow v0.1.0" {
+		t.Errorf("expected 'prflow v0.1.0', got %q", got)
+	}
+}
+
+func TestVersionStringFull(t *testing.T) {
+	oldV, oldC, oldD := Version, Commit, Date
+	defer func() { Version, Commit, Date = oldV, oldC, oldD }()
+	Version = "1.2.3"
+	Commit = "abc1234"
+	Date = "2026-03-30"
+	got := VersionString()
+	expected := "prflow v1.2.3 (commit abc1234, built 2026-03-30)"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+func TestVersionStringPartial(t *testing.T) {
+	oldV, oldC, oldD := Version, Commit, Date
+	defer func() { Version, Commit, Date = oldV, oldC, oldD }()
+	Version = "0.2.0"
+	Commit = "def5678"
+	Date = ""
+	got := VersionString()
+	if !strings.Contains(got, "commit def5678") {
+		t.Errorf("expected commit info in %q", got)
+	}
+	if strings.Contains(got, "built") {
+		t.Errorf("should not contain 'built' when date is empty: %q", got)
+	}
+}

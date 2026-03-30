@@ -77,6 +77,24 @@ func runSync() error {
 	return nil
 }
 
+// classifyPR determines which section a PR belongs in.
+func classifyPR(pr *gh.PR, username string) string {
+	isMyPR := strings.EqualFold(pr.Author.Login, username)
+	if isMyPR {
+		switch {
+		case pr.ReviewDecision == "CHANGES_REQUESTED":
+			return "do_now"
+		case pr.ReviewDecision == "APPROVED":
+			return "do_now"
+		case pr.Mergeable == "CONFLICTING":
+			return "do_now"
+		default:
+			return "waiting"
+		}
+	}
+	return "review"
+}
+
 // hasFlag checks whether flag appears in args.
 func hasFlag(args []string, flag string) bool {
 	for _, a := range args {
