@@ -166,6 +166,8 @@ func RunDashboard(cfg *config.Config) error {
 
 	username, _ := gh.CheckAuth()
 
+	SetTheme(cfg.Settings.Theme)
+
 	m := dashModel{
 		cfg:         cfg,
 		db:          db,

@@ -28,6 +28,7 @@ type SettingsConfig struct {
 	ReposDir        string `yaml:"repos_dir"`
 	MergeMethod     string `yaml:"merge_method"`
 	PageSize        int    `yaml:"page_size"`
+	Theme           string `yaml:"theme"`
 }
 
 func DefaultConfig() *Config {
@@ -51,6 +52,7 @@ func DefaultConfig() *Config {
 			ReposDir:        filepath.Join(home, "repos"),
 			MergeMethod:     "squash",
 			PageSize:        50,
+			Theme:           "auto",
 		},
 	}
 }
