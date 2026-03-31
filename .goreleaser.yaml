@@ -4,13 +4,46 @@ before:
   hooks:
     - go mod tidy
 builds:
-  - env:
+  - id: linux-amd64
+    env:
       - CGO_ENABLED=1
+      - CC=zig cc -target x86_64-linux-gnu
     goos:
       - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    binary: prflow
+  - id: linux-arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=zig cc -target aarch64-linux-gnu
+    goos:
+      - linux
+    goarch:
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    binary: prflow
+  - id: darwin-amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=zig cc -target x86_64-macos-none
+    goos:
       - darwin
     goarch:
       - amd64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    binary: prflow
+  - id: darwin-arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=zig cc -target aarch64-macos-none
+    goos:
+      - darwin
+    goarch:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
@@ -18,9 +51,6 @@ builds:
 archives:
   - format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        format: zip
 checksum:
   name_template: 'checksums.txt'
 changelog:

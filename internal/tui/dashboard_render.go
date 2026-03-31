@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cheenu1092-oss/prflow/internal/cache"
-	"github.com/cheenu1092-oss/prflow/internal/config"
+	"github.com/nagarjun226/prflow/internal/cache"
+	"github.com/nagarjun226/prflow/internal/config"
 )
 
 // View renders the dashboard

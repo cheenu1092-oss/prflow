@@ -1,49 +1,43 @@
 # PRFlow ⚡
 
-**Terminal-first GitHub PR dashboard.** See all your PRs, review comments, and workspace status in one TUI. No more context-switching to GitHub.com.
+**Your morning coffee PR companion.** A terminal-first GitHub PR dashboard that tells you what needs your attention right now. No more context-switching to GitHub.com.
 
-![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## Why?
 
-GitHub's PR management sucks when you're juggling multiple repos. Notifications are a firehose. The PR tab is per-repo. There's no unified **"what do I need to do right now?"** view.
+AI-accelerated development means more PRs, more reviews, more context-switching. GitHub's notification firehose doesn't answer the simple question: **"What should I do right now?"**
 
-PRFlow fixes this. One command, one TUI, everything you need.
+PRFlow does. One command, one TUI, everything prioritized by action needed.
 
 ## Features
 
-- **⚡ Do Now** — PRs needing YOUR action (unresolved comments, ready to merge, conflicts)
-- **⏳ Waiting** — PRs blocked on reviewers (with who + how long)
+- **⚡ Do Now** — PRs needing YOUR action (unresolved comments, ready to merge, conflicts, CI failures)
+- **⏳ Waiting** — PRs blocked on reviewers (with who + how long, color-coded)
 - **👀 Review** — PRs where you're a requested reviewer
-- **📂 Workspace** — Local git status for all your repos (branch, behind/ahead main, dirty files)
-- **✅ Done** — Recently merged PRs
+- **📂 Workspace** — Local git status for all your repos (branch, behind/ahead, dirty files, stale branches)
+- **🔔 Needs Attention** — PRs you reviewed that have been updated since
 - **★ Favorites** — Star repos for detailed sidebar tracking
-- **🔗 Links** — Every item opens directly on GitHub.com with `[o]`
-- **📝 Review Threads** — Expand any PR to see unresolved comment threads
+- **🤖 AI Analysis** — Optional Claude Code integration for PR analysis and draft replies
+- **🔔 Watch Mode** — Background OS notifications when PR state changes
+- **🎨 Themes** — Auto dark/light detection, or set manually
 
 ## Install
 
 ### From Source
 
 ```bash
-# Prerequisites
-# - Go 1.25+
-# - gh CLI (https://cli.github.com) authenticated
-
-git clone https://github.com/cheenu1092-oss/prflow.git
+# Prerequisites: Go 1.24+, gh CLI authenticated
+git clone https://github.com/nagarjun226/prflow.git
 cd prflow
 go build -o prflow .
-
-# Move to PATH
 mv prflow /usr/local/bin/
-# or
-mv prflow ~/.local/bin/
 ```
 
 ### Prerequisites
 
-1. **Go 1.25+** — [golang.org/dl](https://golang.org/dl/)
+1. **Go 1.24+** — [golang.org/dl](https://golang.org/dl/)
 2. **GitHub CLI (`gh`)** — [cli.github.com](https://cli.github.com)
 3. **Authenticate gh:**
    ```bash
@@ -61,21 +55,21 @@ prflow
 prflow setup
 ```
 
-The onboarding wizard will:
-1. ✅ Check your `gh` auth
-2. 📡 Scan repos from your recent PR activity
-3. ☑️ Let you select which repos to track
-4. ⭐ Pick favorites for sidebar tracking
-5. 💾 Save config to `~/.config/prflow/config.yaml`
-
-## Usage
+## Commands
 
 ```bash
 prflow              # Launch TUI dashboard
 prflow setup        # Re-run onboarding wizard
 prflow sync         # Force refresh PR cache
 prflow ls           # Quick list (no TUI)
+prflow ls --json    # JSON output for scripting
+prflow open #42     # Open PR in browser
+prflow open org/repo#42  # Open specific PR
+prflow open org/repo     # Open repo's PR list
+prflow watch        # Background mode with OS notifications
+prflow watch 5m     # Custom poll interval
 prflow config       # Show config file path
+prflow doctor       # Check dependencies (gh, git, claude)
 prflow version      # Print version
 ```
 
@@ -94,46 +88,24 @@ prflow version      # Print version
 ### Actions
 | Key | Action |
 |-----|--------|
-| `o` | Open in GitHub.com (browser) |
-| `c` | Checkout PR branch locally (finds repo or clones) |
-| `C` | Clone PR's repo to repos dir |
+| `o` | Open in GitHub (browser) |
+| `c` | Checkout PR branch locally |
+| `C` | Clone PR's repo |
 | `/` | Search org repos to clone |
 | `a` | Approve PR (detail view) |
-| `m` | Merge PR with squash (detail view) |
-| `r` | Resolve selected review thread (detail view) |
-| `R` | Force refresh all data |
+| `m` | Merge PR (detail view, double-press to confirm) |
+| `r` | Resolve review thread (detail view) |
+| `R` | Reply to review thread (detail view) / Refresh (list view) |
+| `n` | Nudge stale reviewer (waiting/do-now sections) |
+| `A` | AI analysis (detail view, requires Claude Code) |
 
 ### Workspace (📂 section)
 | Key | Action |
 |-----|--------|
 | `p` | `git pull` current branch |
 | `P` | `git push` current branch |
-| `f` | Fetch all repos in parallel |
-
-## Architecture
-
-PRFlow is a thin wrapper around the `gh` CLI. It doesn't talk to the GitHub API directly — if `gh` works, PRFlow works.
-
-```
-┌─────────────┐
-│   Human     │ ← TUI (Bubbletea)
-├─────────────┤
-│   PRFlow    │ ← smart wrapper, caching, favorites
-├─────────────┤
-│   gh CLI    │ ← does ALL the GitHub API work
-├─────────────┤
-│  GitHub.com │ ← every item links back here
-└─────────────┘
-```
-
-**No tokens. No OAuth. No API keys.** Just `gh auth login` and go.
-
-### Tech Stack
-- **Go** — single binary, no runtime deps
-- **[Bubbletea](https://github.com/charmbracelet/bubbletea)** — terminal UI framework
-- **[Lipgloss](https://github.com/charmbracelet/lipgloss)** — TUI styling
-- **SQLite** — local cache for instant TUI (no API wait on navigate)
-- **YAML** — config at `~/.config/prflow/config.yaml`
+| `f` | Fetch all repos |
+| `d` | Delete stale (merged) branches |
 
 ## Configuration
 
@@ -143,11 +115,9 @@ Config lives at `~/.config/prflow/config.yaml`:
 repos:
   - org/repo-one
   - org/repo-two
-  - org/repo-three
 
 favorites:
   - org/repo-one
-  - org/repo-two
 
 workspace:
   scan_dirs:
@@ -156,70 +126,29 @@ workspace:
     - ~/work
   repos:
     org/repo-one: ~/repos/repo-one
-    org/repo-two: ~/repos/repo-two
 
 settings:
-  refresh_interval: 2m
-  stale_threshold: 3d
-  editor: vim
-  repos_dir: ~/repos
-  merge_method: squash
-  page_size: 50
+  refresh_interval: 2m      # Auto-refresh interval
+  stale_threshold: 3d        # When reviewer wait turns red
+  editor: vim                # Default editor
+  repos_dir: ~/repos         # Where to clone repos
+  merge_method: squash       # Merge strategy (squash/merge/rebase)
+  page_size: 50              # Max PRs per repo fetch
+  theme: auto                # Theme: auto, dark, light
+  watch_interval: 2m         # Watch mode poll interval
 ```
 
-## How Sections Work
+## Architecture
 
-### ⚡ Do Now
-PRs where only **you** can unblock progress:
-- Unresolved review comments on your PRs
-- PRs approved + CI green → ready to merge
-- Merge conflicts on your PRs
-- CI failures you need to fix
+PRFlow is a thin wrapper around the `gh` CLI. It doesn't talk to the GitHub API directly — if `gh` works, PRFlow works.
 
-### ⏳ Waiting
-PRs blocked on **other people**:
-- Your PRs waiting for reviewer response
-- Shows who + how long (color-coded: 🟢 < 1d, 🟡 1-3d, 🔴 3d+)
-
-### 👀 Review
-PRs where **you're blocking someone**:
-- Review requested from you
-- Sorted by how long they've been waiting
-
-### 📂 Workspace
-Local git state for all your repos:
-- Current branch + behind/ahead of main
-- Modified/staged/untracked files
-- Unpushed commits
-- Last commit info
-- Quick git shortcuts (pull, push, fetch)
-
-## Roadmap
-
-- [x] **v0.2** — Checkout PR branch locally (auto-find or clone)
-- [x] **v0.2** — Search org repos + clone from TUI
-- [x] **v0.2** — Done section (recently merged PRs)
-- [x] **v0.2** — 2-level deep workspace scanning
-- [ ] **v0.2** — Reply to review comments from TUI
-- [ ] **v0.2** — Merge from TUI
-- [ ] **v0.2** — Nudge stale reviewers
-- [ ] **v0.3** — Background auto-refresh
-- [ ] **v0.3** — Branch cleanup suggestions (merged PR branches)
-- [ ] **v0.3** — `prflow ls --json` for scripting
-- [ ] **v1.0** — Installable via `go install` / Homebrew
-
-## Contributing
-
-PRs welcome! This project is in early development.
-
-```bash
-# Dev setup
-git clone https://github.com/cheenu1092-oss/prflow.git
-cd prflow
-go mod download
-go build -o prflow .
-./prflow
 ```
+Human → TUI (Bubbletea) → PRFlow → gh CLI → GitHub API
+                             ↓
+                        SQLite Cache
+```
+
+**No tokens. No OAuth. No API keys.** Just `gh auth login` and go.
 
 ## License
 

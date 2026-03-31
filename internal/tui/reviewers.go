@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 // ReviewerStatus represents the state and wait time for a reviewer

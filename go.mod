@@ -1,4 +1,4 @@
-module github.com/cheenu1092-oss/prflow
+module github.com/nagarjun226/prflow
 
 go 1.24.7
 

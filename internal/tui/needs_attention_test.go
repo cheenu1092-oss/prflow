@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 func TestNeedsReReview(t *testing.T) {

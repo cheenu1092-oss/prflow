@@ -9,7 +9,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 func setupTestDB(t *testing.T) *DB {

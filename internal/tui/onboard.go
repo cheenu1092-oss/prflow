@@ -10,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cheenu1092-oss/prflow/internal/config"
-	"github.com/cheenu1092-oss/prflow/internal/deps"
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/config"
+	"github.com/nagarjun226/prflow/internal/deps"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 type onboardStep int

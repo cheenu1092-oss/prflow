@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cheenu1092-oss/prflow/internal/cache"
-	"github.com/cheenu1092-oss/prflow/internal/config"
-	"github.com/cheenu1092-oss/prflow/internal/gh"
-	"github.com/cheenu1092-oss/prflow/internal/notify"
+	"github.com/nagarjun226/prflow/internal/cache"
+	"github.com/nagarjun226/prflow/internal/config"
+	"github.com/nagarjun226/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/notify"
 )
 
 // Change represents a detected change on a PR.

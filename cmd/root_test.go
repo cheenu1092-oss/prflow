@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cheenu1092-oss/prflow/internal/config"
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/config"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 func TestPrintUsage(t *testing.T) {

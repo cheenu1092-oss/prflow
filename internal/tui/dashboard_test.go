@@ -5,9 +5,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/cheenu1092-oss/prflow/internal/cache"
-	"github.com/cheenu1092-oss/prflow/internal/config"
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/cache"
+	"github.com/nagarjun226/prflow/internal/config"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 func TestTimeSince(t *testing.T) {

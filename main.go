@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cheenu1092-oss/prflow/cmd"
+	"github.com/nagarjun226/prflow/cmd"
 )
 
 // Set via ldflags at build time.

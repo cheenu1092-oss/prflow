@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/cheenu1092-oss/prflow/internal/deps"
-	"github.com/cheenu1092-oss/prflow/internal/gh"
+	"github.com/nagarjun226/prflow/internal/deps"
+	"github.com/nagarjun226/prflow/internal/gh"
 )
 
 // Available returns whether AI features can be used

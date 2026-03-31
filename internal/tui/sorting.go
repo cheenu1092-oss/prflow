@@ -3,7 +3,7 @@ package tui
 import (
 	"sort"
 
-	"github.com/cheenu1092-oss/prflow/internal/cache"
+	"github.com/nagarjun226/prflow/internal/cache"
 )
 
 // DefaultStaleThresholdDays is used when no config is available
