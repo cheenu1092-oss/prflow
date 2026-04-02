@@ -18,8 +18,8 @@ PRFlow does NOT talk to GitHub API directly. It shells out to `gh` CLI for every
 ## Architecture
 
 ```
-Human → TUI (Bubbletea) → PRFlow Logic → gh CLI → GitHub API
-                              ↕
+Human -> TUI (Bubbletea) -> PRFlow Logic -> gh CLI -> GitHub API
+                              |
                         SQLite Cache
 ```
 
@@ -28,50 +28,50 @@ Human → TUI (Bubbletea) → PRFlow Logic → gh CLI → GitHub API
 When no config exists (`~/.config/prflow/config.yaml` not found), launch onboarding:
 
 ```
-╔══════════════════════════════════════════════════╗
-║  Welcome to PRFlow! Let's get you set up. 🚀     ║
-╠══════════════════════════════════════════════════╣
-║                                                  ║
-║  Step 1/3: GitHub Authentication                 ║
-║                                                  ║
-║  Checking gh CLI... ✓ authenticated as @nagaconda║
-║                                                  ║
-║  Step 2/3: Select your repos                     ║
-║                                                  ║
-║  Scanning your recent activity...                ║
-║                                                  ║
-║  Found 12 repos with your PRs:                   ║
-║  [x] juniper/mist-api        (4 open PRs)       ║
-║  [x] hpe/wifi-engine         (3 open PRs)       ║
-║  [ ] hpe/wan-core            (2 open PRs)       ║
-║  [x] hpe/iot-dash            (1 open PR)        ║
-║  [ ] personal/dotfiles       (0 open PRs)       ║
-║  ...                                             ║
-║                                                  ║
-║  [space] toggle  [a] select all  [enter] next    ║
-║                                                  ║
-║  Step 3/3: Set favorites (★)                     ║
-║                                                  ║
-║  Star repos you want detailed tracking for:      ║
-║  ★ juniper/mist-api                              ║
-║  ★ hpe/wifi-engine                               ║
-║    hpe/iot-dash                                   ║
-║                                                  ║
-║  [space] toggle star  [enter] finish             ║
-║                                                  ║
-║  ✓ Config saved to ~/.config/prflow/config.yaml  ║
-║  ✓ Initial sync complete (14 PRs loaded)         ║
-║                                                  ║
-║  Press [enter] to launch PRFlow!                 ║
-╚══════════════════════════════════════════════════╝
++--------------------------------------------------+
+|  Welcome to PRFlow! Let's get you set up.         |
++--------------------------------------------------+
+|                                                    |
+|  Step 1/3: GitHub Authentication                   |
+|                                                    |
+|  Checking gh CLI... authenticated as @nagaconda    |
+|                                                    |
+|  Step 2/3: Select your repos                       |
+|                                                    |
+|  Scanning your recent activity...                  |
+|                                                    |
+|  Found 12 repos with your PRs:                     |
+|  [x] juniper/mist-api        (4 open PRs)         |
+|  [x] hpe/wifi-engine         (3 open PRs)         |
+|  [ ] hpe/wan-core            (2 open PRs)         |
+|  [x] hpe/iot-dash            (1 open PR)          |
+|  [ ] personal/dotfiles       (0 open PRs)         |
+|  ...                                               |
+|                                                    |
+|  [space] toggle  [a] select all  [enter] next      |
+|                                                    |
+|  Step 3/3: Set favorites                           |
+|                                                    |
+|  Star repos you want detailed tracking for:        |
+|  * juniper/mist-api                                |
+|  * hpe/wifi-engine                                 |
+|    hpe/iot-dash                                    |
+|                                                    |
+|  [space] toggle star  [enter] finish               |
+|                                                    |
+|  Config saved to ~/.config/prflow/config.yaml      |
+|  Initial sync complete (14 PRs loaded)             |
+|                                                    |
+|  Press [enter] to launch PRFlow!                   |
++--------------------------------------------------+
 ```
 
 ### Onboarding Steps:
-1. **Check `gh auth status`** — if not authenticated, show instructions to run `gh auth login`
-2. **Scan repos** — run `gh api user/repos` + search for repos where user has open PRs. Show multi-select list.
-3. **Pick favorites** — from selected repos, pick which to star for detailed tracking
-4. **Write config** — save to `~/.config/prflow/config.yaml`
-5. **Initial sync** — fetch all PR data into SQLite cache
+1. **Check `gh auth status`** -- if not authenticated, show instructions to run `gh auth login`
+2. **Scan repos** -- run `gh api user/repos` + search for repos where user has open PRs. Show multi-select list.
+3. **Pick favorites** -- from selected repos, pick which to star for detailed tracking
+4. **Write config** -- save to `~/.config/prflow/config.yaml`
+5. **Initial sync** -- fetch all PR data into SQLite cache
 6. **Launch main TUI**
 
 ## Main TUI Layout
@@ -81,11 +81,11 @@ Two-panel layout:
 - **Right main panel** (wide): PR list for selected section
 
 ### Sections (left sidebar)
-1. ⚡ **Do Now** — PRs needing YOUR action (unresolved comments, ready to merge, conflicts, CI failures)
-2. ⏳ **Waiting** — PRs blocked on other people (with who + how long)
-3. 👀 **Review** — PRs where you're a requested reviewer
-4. ★ **Favorites** — List of favorited repos (expandable)
-5. ✅ **Done** — Recently merged/closed PRs
+1. **Do Now** -- PRs needing YOUR action (unresolved comments, ready to merge, conflicts, CI failures)
+2. **Waiting** -- PRs blocked on other people (with who + how long)
+3. **Review** -- PRs where you're a requested reviewer
+4. **Workspace** -- Local git repo status (branch, behind/ahead, dirty files, stale branches)
+5. **Needs Attention Again** -- PRs you reviewed that have been updated since your last review
 
 ### PR List (right panel)
 Each PR row shows:
@@ -97,34 +97,36 @@ Each PR row shows:
 
 ### Section Logic
 
-**⚡ Do Now** (sorted by urgency):
+**Do Now** (sorted by urgency):
 - PRs with unresolved review comments addressed to you (show latest comment preview)
 - PRs that are approved + CI green (show "READY TO MERGE")
 - PRs with merge conflicts (show conflicting files)
 - PRs with failing CI (show which checks failed)
 
-**⏳ Waiting** (sorted by wait time):
+**Waiting** (sorted by wait time):
 - PRs where you're the author and waiting for reviewers
 - Show each reviewer + how long they've been sitting on it
-- Color: 🟢 < 1 day, 🟡 1-3 days, 🔴 3+ days
+- Color: green < 1 day, yellow 1-3 days, red 3+ days
 
-**👀 Review** (sorted by time waiting):
+**Review** (sorted by time waiting):
 - PRs where review-requested includes you
 - Show author + how long they've been waiting for you
 
-**★ Favorites:**
-- Each favorite repo shows: open PR count, last activity
-- Selecting a repo shows all its PRs (not just yours)
+**Workspace:**
+- Auto-scans configured directories for git repos
+- Per-repo: branch, behind/ahead, modified/staged/untracked files, stale branches
+- Links local branches to GitHub PRs
+- Color coding: green (clean), yellow (changes), red (far behind/conflicts)
 
-**✅ Done:**
-- Last 20 merged/closed PRs
-- When merged, by whom
+**Needs Attention Again:**
+- PRs you previously reviewed that have been updated since your last review
+- Filtered to exclude PRs you authored
 
 ## Expanded PR View (press Enter on a PR)
 
 Shows full detail:
 - PR title, description (first few lines)
-- Branch: `feature/xyz → main`
+- Branch: `feature/xyz -> main`
 - Status: Draft / Open / Changes Requested / Approved
 - CI checks: list each check + status
 - Reviewers: who + their verdict
@@ -140,51 +142,70 @@ When expanding a comment thread:
 - Show conversation (author, comment text, replies)
 - Highlight which comments need YOUR response
 - `[o]` opens that specific comment on GitHub.com
-- `[r]` opens a text input to reply (posts via `gh api`)
+- `[r]` resolves the thread
+- `[R]` opens a text input to reply
 
 ## Reply Feature
 
 Simple text input box:
 - Type your reply
-- `[ctrl+enter]` or `[enter]` to send (via `gh api`)
+- `[enter]` to send (via `gh api` GraphQL)
 - `[esc]` to cancel
-- `[tab]` to also resolve the thread when sending
 
-## Key Bindings (Global)
+## Key Bindings
 
+### Navigation
 | Key | Action |
 |-----|--------|
-| ↑/↓ or j/k | Navigate items |
-| Tab | Switch sections |
-| Enter | Expand/collapse PR or thread |
-| o | Open current item on GitHub.com |
-| r | Reply to selected comment thread |
-| m | Merge selected PR (if ready) |
-| c | Checkout PR locally (`gh pr checkout`) |
-| n | Nudge reviewer (comment @mention) |
-| ★ or f | Toggle favorite on repo |
-| / | Search/filter |
-| R | Force refresh |
+| up/down or j/k | Navigate items |
+| Tab | Next section |
+| Shift+Tab | Previous section |
+| Enter | Expand PR detail |
+| Esc | Back to list |
 | q | Quit |
-| ? | Help overlay |
+
+### Actions
+| Key | Action |
+|-----|--------|
+| o | Open in GitHub (browser) |
+| c | Checkout PR branch locally |
+| C | Clone PR's repo |
+| / | Search org repos to clone |
+| a | Approve PR (detail view) |
+| m | Merge PR (detail view, double-press to confirm) |
+| r | Resolve review thread (detail view) |
+| R | Reply to review thread (detail view) / Refresh (list view) |
+| n | Nudge stale reviewer (waiting/do-now sections, with cooldown) |
+| A | AI analysis (detail view, requires Claude Code) |
+
+### Workspace
+| Key | Action |
+|-----|--------|
+| p | `git pull` current branch |
+| P | `git push` current branch |
+| f | Fetch all repos |
+| d | Delete stale (merged) branches |
 
 ## `gh` Command Mapping
 
 ```
-Action                    → gh command
-──────────────────────────────────────────────────────
-List my authored PRs      → gh search prs --author=@me --state=open --json ...
-List review requests      → gh search prs --review-requested=@me --state=open --json ...
-PR details                → gh pr view <num> -R <repo> --json title,body,state,reviews,reviewRequests,statusCheckRollup,mergeable,comments,files,...
-PR review comments        → gh api repos/{owner}/{repo}/pulls/{num}/comments
-PR review threads         → gh api graphql (pullRequest.reviewThreads)
-Reply to comment          → gh api -X POST repos/{owner}/{repo}/pulls/{num}/comments -f body="..."
-Merge PR                  → gh pr merge <num> -R <repo> --squash
-Checkout PR               → gh pr checkout <num> -R <repo>
-Nudge reviewer            → gh pr comment <num> -R <repo> --body "@reviewer friendly ping 👋"
-List user repos           → gh repo list --json name,owner --limit 100
-Recently merged           → gh search prs --author=@me --state=closed --merged --json ...
-CI status                 → gh pr checks <num> -R <repo>
+Action                    -> gh command
+-----------------------------------------------------------
+List my authored PRs      -> gh search prs --author=@me --state=open --json ...
+List review requests      -> gh search prs --review-requested=@me --state=open --json ...
+List reviewed PRs         -> gh search prs --reviewed-by=@me --state=open --json ...
+PR details                -> gh pr view <num> -R <repo> --json title,body,state,reviews,...
+PR review threads         -> gh api graphql (pullRequest.reviewThreads)
+Reply to thread           -> gh api graphql (addPullRequestReviewThreadReply)
+Resolve thread            -> gh api graphql (resolveReviewThread)
+Approve PR                -> gh pr review <num> -R <repo> --approve
+Merge PR                  -> gh pr merge <num> -R <repo> --squash|--merge|--rebase
+Checkout PR               -> gh pr checkout <num> -R <repo>
+Nudge reviewer            -> gh pr comment <num> -R <repo> --body "@reviewer ..."
+List user repos           -> gh repo list --json name,owner --limit 100
+Search repos              -> gh search repos <query> --json nameWithOwner
+Clone repo                -> gh repo clone <repo> <dest>
+Get PR diff               -> gh pr diff <num> -R <repo>
 ```
 
 ## SQLite Cache Schema
@@ -192,21 +213,21 @@ CI status                 → gh pr checks <num> -R <repo>
 ```sql
 CREATE TABLE prs (
     id INTEGER PRIMARY KEY,
-    repo TEXT NOT NULL,          -- "org/repo"
+    repo TEXT NOT NULL,
     number INTEGER NOT NULL,
     title TEXT,
-    state TEXT,                  -- open, closed, merged
+    state TEXT,
     author TEXT,
     branch TEXT,
     base_branch TEXT,
-    url TEXT,                    -- github.com link
+    url TEXT,
     created_at TEXT,
     updated_at TEXT,
-    mergeable TEXT,              -- MERGEABLE, CONFLICTING, UNKNOWN
-    review_decision TEXT,        -- APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
-    ci_status TEXT,              -- SUCCESS, FAILURE, PENDING
-    section TEXT,                -- computed: do_now, waiting, review, done
-    raw_json TEXT,               -- full gh output for detail view
+    mergeable TEXT,
+    review_decision TEXT,
+    ci_status TEXT,
+    section TEXT,
+    raw_json TEXT,
     fetched_at TEXT,
     UNIQUE(repo, number)
 );
@@ -215,13 +236,13 @@ CREATE TABLE review_threads (
     id INTEGER PRIMARY KEY,
     pr_id INTEGER REFERENCES prs(id),
     thread_id TEXT,
-    path TEXT,                   -- file path
+    path TEXT,
     line INTEGER,
     is_resolved BOOLEAN,
     last_author TEXT,
     last_body TEXT,
     needs_my_reply BOOLEAN,
-    url TEXT,                    -- github.com link to this thread
+    url TEXT,
     raw_json TEXT,
     UNIQUE(pr_id, thread_id)
 );
@@ -230,7 +251,7 @@ CREATE TABLE reviewers (
     id INTEGER PRIMARY KEY,
     pr_id INTEGER REFERENCES prs(id),
     login TEXT,
-    state TEXT,                  -- PENDING, APPROVED, CHANGES_REQUESTED, COMMENTED
+    state TEXT,
     requested_at TEXT,
     UNIQUE(pr_id, login)
 );
@@ -251,95 +272,114 @@ CREATE TABLE config (
 ```yaml
 # ~/.config/prflow/config.yaml
 repos:
-  - juniper/mist-api
-  - hpe/wifi-engine
-  - hpe/wan-core
-  - hpe/iot-dash
+  - org/repo-one
+  - org/repo-two
 
 favorites:
-  - juniper/mist-api
-  - hpe/wifi-engine
+  - org/repo-one
+
+workspace:
+  scan_dirs:
+    - ~/repos
+    - ~/Projects
+    - ~/work
+  repos:
+    org/repo-one: ~/repos/repo-one
 
 settings:
   refresh_interval: 2m
-  stale_threshold: 3d       # when reviewer wait turns red
-  editor: cursor
-  repos_dir: ~/repos        # for checkout
-  merge_method: squash      # squash, merge, rebase
-  page_size: 50             # max PRs to fetch per repo
+  stale_threshold: 3d
+  editor: vim
+  repos_dir: ~/repos
+  merge_method: squash
+  page_size: 50
+  theme: auto
+  watch_interval: 2m
 ```
 
 ## CLI Interface
 
 ```bash
-prflow              # launch TUI
-prflow setup        # re-run onboarding
-prflow sync         # force refresh cache
-prflow ls           # quick list (no TUI)
-prflow ls --action  # only "do now" items  
-prflow open <pr>    # open in browser
-prflow config       # open config in $EDITOR
-prflow version      # version info
+prflow              # Launch TUI dashboard
+prflow setup        # Re-run onboarding wizard
+prflow sync         # Force refresh PR cache
+prflow ls           # Quick list (no TUI)
+prflow ls --json    # JSON output for scripting
+prflow open #42     # Open PR in browser
+prflow open org/repo#42  # Open specific PR
+prflow open org/repo     # Open repo's PR list
+prflow watch        # Background mode with OS notifications
+prflow watch 5m     # Custom poll interval
+prflow config       # Show config file path
+prflow doctor       # Check dependencies (gh, git, claude)
+prflow version      # Print version
 ```
 
 ## Build & Install
 
 ```bash
 go build -o prflow .
-# or
-go install github.com/cheenu1092-oss/prflow@latest
 ```
 
 ## Project Structure
 
 ```
 prflow/
-├── main.go              # entry point, CLI parsing
+├── main.go                        # Entry point
 ├── cmd/
-│   ├── tui.go           # main TUI command
-│   ├── setup.go         # onboarding command
-│   ├── list.go          # quick list command
-│   └── sync.go          # force sync command
+│   └── root.go                    # CLI command dispatch
 ├── internal/
-│   ├── gh/
-│   │   ├── client.go    # gh CLI wrapper (exec commands, parse JSON)
-│   │   └── types.go     # GitHub data types
+│   ├── ai/
+│   │   └── analyze.go             # Claude Code integration (optional)
 │   ├── cache/
-│   │   ├── db.go        # SQLite operations
-│   │   └── sync.go      # sync logic (gh → cache)
+│   │   └── db.go                  # SQLite cache operations
 │   ├── config/
-│   │   └── config.go    # YAML config read/write
-│   └── tui/
-│       ├── app.go       # main Bubbletea model
-│       ├── sidebar.go   # left panel (sections + favs)
-│       ├── prlist.go    # right panel (PR list)
-│       ├── prdetail.go  # expanded PR view
-│       ├── threads.go   # comment thread view
-│       ├── reply.go     # reply input
-│       ├── onboard.go   # onboarding TUI
-│       ├── styles.go    # Lipgloss styles
-│       └── keys.go      # key bindings
-├── go.mod
-├── go.sum
+│   │   └── config.go              # YAML config read/write/validate
+│   ├── deps/
+│   │   └── check.go               # Dependency checking (gh, git, claude)
+│   ├── gh/
+│   │   ├── client.go              # gh CLI wrapper (queries + actions)
+│   │   └── runner.go              # Command execution (mockable)
+│   ├── notify/
+│   │   └── notify.go              # Cross-platform desktop notifications
+│   ├── tui/
+│   │   ├── dashboard.go           # Main Bubbletea model + event loop
+│   │   ├── dashboard_actions.go   # Key bindings & inline actions
+│   │   ├── dashboard_render.go    # View rendering (sidebar, cards, detail)
+│   │   ├── dashboard_sync.go      # Background data fetching
+│   │   ├── onboard.go             # Onboarding wizard TUI
+│   │   ├── workspace.go           # Local git repo scanning
+│   │   ├── styles.go              # Lipgloss styles
+│   │   ├── theme.go               # Auto dark/light theme detection
+│   │   ├── sorting.go             # PR urgency sorting
+│   │   ├── reviewers.go           # Reviewer state & wait time
+│   │   └── refresh.go             # Auto-refresh ticker
+│   └── watch/
+│       └── watcher.go             # Background polling + OS notifications
+├── .github/workflows/
+│   ├── ci.yml                     # Build + test + lint
+│   └── release.yml                # GoReleaser cross-compile
+├── .goreleaser.yaml               # Release config
+├── go.mod / go.sum
 ├── README.md
-└── SPEC.md
+├── SPEC.md
+└── WORKSPACE_SPEC.md
 ```
 
-## v0.1 MVP Scope
+## Version History
 
-For the first buildable version, focus on:
-1. ✅ `gh auth` check
-2. ✅ Onboarding TUI (scan repos, select, pick favorites, save config)
-3. ✅ Fetch PRs via `gh` into SQLite cache
-4. ✅ Main TUI with 4 sections (Do Now, Waiting, Review, Done)
-5. ✅ PR list with status indicators
-6. ✅ `[o]` open in browser for any PR
-7. ✅ `[enter]` expand PR to see details + comment threads
-8. ✅ Favorites sidebar
+### v0.1.0 (Current)
+All features listed above are implemented and shipping:
+- Full TUI with 5 sections (Do Now, Waiting, Review, Workspace, Needs Attention)
+- Inline PR actions (approve, merge, checkout, clone, reply, resolve, nudge)
+- Workspace with git status, stale branch cleanup
+- AI-powered PR analysis (optional, requires Claude Code)
+- Background watch mode with OS notifications
+- Configurable themes (auto/dark/light)
+- Cross-platform builds via GoReleaser (Linux + macOS, amd64 + arm64)
 
-Defer to v0.2:
-- Reply to comments
-- Checkout integration
-- Merge from TUI
-- Nudge reviewers
-- Background auto-refresh
+### Future Ideas
+- Draft PR creation from TUI
+- Advanced filtering and search within PR lists
+- Custom keybinding configuration
+- IDE integration plugins

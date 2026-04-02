@@ -25,6 +25,20 @@ PRFlow does. One command, one TUI, everything prioritized by action needed.
 
 ## Install
 
+### Download Binary (Recommended)
+
+Grab the latest release for your platform from [GitHub Releases](https://github.com/nagarjun226/prflow/releases):
+
+```bash
+# Linux (amd64)
+curl -sL https://github.com/nagarjun226/prflow/releases/latest/download/prflow_$(curl -s https://api.github.com/repos/nagarjun226/prflow/releases/latest | grep tag_name | cut -d '"' -f4 | tr -d v)_linux_amd64.tar.gz | tar xz
+sudo mv prflow /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -sL https://github.com/nagarjun226/prflow/releases/latest/download/prflow_$(curl -s https://api.github.com/repos/nagarjun226/prflow/releases/latest | grep tag_name | cut -d '"' -f4 | tr -d v)_darwin_arm64.tar.gz | tar xz
+sudo mv prflow /usr/local/bin/
+```
+
 ### From Source
 
 ```bash
@@ -32,18 +46,18 @@ PRFlow does. One command, one TUI, everything prioritized by action needed.
 git clone https://github.com/nagarjun226/prflow.git
 cd prflow
 go build -o prflow .
-mv prflow /usr/local/bin/
+sudo mv prflow /usr/local/bin/
 ```
 
 ### Prerequisites
 
-1. **Go 1.24+** — [golang.org/dl](https://golang.org/dl/)
-2. **GitHub CLI (`gh`)** — [cli.github.com](https://cli.github.com)
-3. **Authenticate gh:**
+1. **GitHub CLI (`gh`)** — [cli.github.com](https://cli.github.com)
+2. **Authenticate gh:**
    ```bash
    gh auth login
    gh auth status  # verify it works
    ```
+3. **Go 1.24+** (only for building from source) — [golang.org/dl](https://golang.org/dl/)
 
 ## Quick Start
 
